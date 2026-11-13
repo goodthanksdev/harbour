@@ -1022,8 +1022,12 @@ async function launchDirect(game) {
     return true;
   }
   const exe = macAppBinary(file);
+  // A PC port can need options or its own starting folder (NX2navi starts through its launcher's play mode).
+  const entry = game.recomp ? config.extraGames.find(x => x.id === game.added) : null;
+  const args = Array.isArray(entry?.args) ? entry.args.map(String) : [];
+  const cwd = entry?.cwd && fs.existsSync(entry.cwd) ? entry.cwd : path.dirname(exe);
   return new Promise((resolve, reject) => {
-    const child = spawn(exe, [], { cwd: path.dirname(exe), detached: true, stdio: 'ignore' });
+    const child = spawn(exe, args, { cwd, detached: true, stdio: 'ignore' });
     child.once('error', e => reject(new Error(`Launch failed: ${e.message}`)));
     child.once('spawn', () => { track(game, child); child.unref(); resolve(true); });
   });
