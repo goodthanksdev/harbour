@@ -19,7 +19,7 @@
     <div class="brand"><img src="assets/brand/harbour-mark.svg" alt="" /><span>HAR<b>BOUR</b></span></div>
     <nav id="tabsView" aria-label="Consoles"><div id="tabs"></div></nav>
     <div class="top-right">
-      <span id="updatePill" class="pill new" hidden></span>
+      <button id="updatePill" class="pill new" hidden title="See and install updates"></button>
       <span id="clock"></span>
       <button id="btnAdd" class="icon-btn" title="Add a game or emulator" aria-label="Add a game or emulator">＋</button>
       <button id="btnSettings" class="icon-btn" title="Settings (Start)" aria-label="Settings">⚙</button>
@@ -59,6 +59,14 @@
     <div class="set-row"><span>UI sound volume</span><span class="slider"><input type="range" id="setUiVol" min="0" max="100" step="5" /><output id="setUiVolOut"></output></span></div>
     <div class="set-row"><span>Window</span><button id="setFull">Toggle fullscreen (F11)</button></div>
     <div class="dlg-actions"><button id="setQuit">Quit Harbour</button><button id="setClose" class="primary">Close</button></div>
+  </dialog>
+
+  <!-- Everything with an update, and "Update all" -->
+  <dialog id="updatesDlg">
+    <h2>Updates</h2>
+    <div id="updList" class="upd-list"></div>
+    <p class="note">"Update all" installs every update Harbour can do by itself. The others update with their own launcher or updater: open the release page, update, then press "I've updated it".</p>
+    <div class="dlg-actions"><button id="updAll" class="primary">Update all</button><button id="updClose">Close</button></div>
   </dialog>
 
   <!-- Your emulators, and which one each console uses -->

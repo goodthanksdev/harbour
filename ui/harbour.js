@@ -113,12 +113,60 @@ function renderRow() {
   });
   refreshBadges();
 }
+// ---------- updates: recomps and emulators in one list ----------
+function pendingUpdates() {
+  const games = Object.entries(S.recomp).filter(([, s]) => s.updateAvailable).map(([id, s]) => ({ kind: 'game', id, s, g: S.games.find(g => g.id === id) }))
+    .filter(u => u.g).map(u => ({ ...u, name: u.g.title, from: u.s.installed?.tag, to: u.s.latest?.tag, auto: !!u.s.auto }));
+  const emus = Object.entries(S.emuStatus || {}).filter(([, s]) => s.updateAvailable)
+    .map(([id, s]) => ({ kind: 'emu', id, s, name: (S.emus || []).find(e => e.id === id)?.name || id, from: s.installed, to: s.latest?.tag, auto: false }));
+  return [...games, ...emus];
+}
+function openUpdates() { UISound.play('open'); renderUpdates(); if (!$('#updatesDlg').open) $('#updatesDlg').showModal(); }
+function renderUpdates() {
+  const list = pendingUpdates();
+  $('#updAll').hidden = !list.some(u => u.auto);
+  $('#updAll').textContent = `Update all (${list.filter(u => u.auto).length})`;
+  $('#updList').replaceChildren(...(list.length ? list.map(u => {
+    const row = el('div', 'upd-row');
+    const name = el('div', 'upd-name'); name.append(el('b', '', u.name), el('small', '', `${u.kind === 'emu' ? 'Emulator' : 'Game'} · ${u.from || '?'} → ${u.to || '?'}`));
+    const btns = el('div', 'emu-btns');
+    const b = (text, fn, cls = '') => { const x = el('button', cls, text); x.type = 'button'; x.onclick = fn; btns.append(x); return x; };
+    if (u.auto) b('Update', () => updateOne(u), 'primary');
+    else {
+      b('Release page', () => (u.kind === 'emu' ? api.openEmulatorPage(u.id) : api.recompOpenPage(u.id)).catch(e => toast(e.message)));
+      b("I've updated it", async () => {
+        try {
+          if (u.kind === 'emu') S.emuStatus[u.id] = await api.markEmulatorCurrent(u.id);
+          else S.recomp[u.id] = await api.recompMarkCurrent(u.id);
+          UISound.play('select'); afterUpdates();
+        } catch (e) { toast(e.message); }
+      });
+    }
+    row.append(name, btns); return row;
+  }) : [el('p', 'note', 'Everything is up to date.')]));
+}
+function afterUpdates() { refreshBadges(); renderRow(); select(S.sel, true); if ($('#updatesDlg').open) renderUpdates(); }
+async function updateOne(u) {
+  if (updating) return toast('An update is already running.');
+  updating = true;
+  try { S.recomp[u.id] = await api.recompUpdate(u.id); UISound.play('select'); toast(`${u.name} updated to ${u.to}.`, 5000); }
+  catch (e) { UISound.play('error'); toast(`${u.name}: ${e.message}`, 7000); }
+  finally { updating = false; afterUpdates(); }
+}
+$('#updAll').onclick = async () => {
+  const autos = pendingUpdates().filter(u => u.auto);
+  for (const u of autos) await updateOne(u); // one at a time: each downloads, checks and backs up on its own
+  toast(autos.length ? `Done: ${autos.length} update${autos.length === 1 ? '' : 's'} installed.` : 'Nothing to install automatically.', 6000);
+};
+$('#updClose').onclick = () => { UISound.play('back'); $('#updatesDlg').close(); };
+$('#updatePill').onclick = openUpdates;
+
 function refreshBadges() {
   [...$('#row').children].forEach((it, i) => {
     const g = S.list[i]; it.querySelector('.badge')?.remove();
     if (S.recomp[g?.id]?.updateAvailable) it.append(el('span', 'badge', 'UPDATE'));
   });
-  const n = Object.entries(S.recomp).filter(([id, s]) => s.updateAvailable && S.games.some(g => g.id === id)).length;
+  const n = pendingUpdates().length;
   const pill = $('#updatePill'); pill.hidden = !n; pill.textContent = `${n} update${n === 1 ? '' : 's'}`;
 }
 let videoTimer = null, saveTimer = null;
@@ -642,6 +690,7 @@ function act(a) {
     case 'update': update(); break;
     case 'more': UISound.play('open'); openMenu($('#btnMore')); break;
     case 'settings': UISound.play('open'); openSettings(); break;
+    case 'updates': openUpdates(); break;
   }
 }
 addEventListener('keydown', e => {
@@ -669,7 +718,7 @@ function pollPads() {
       continue;
     }
     const keys = { left: b(14) || ax(0, -1), right: b(15) || ax(0, 1), up: b(12) || ax(1, -1), down: b(13) || ax(1, 1),
-      ok: b(0), back: b(1), more: b(2), update: b(3), tabprev: b(4), tabnext: b(5), pgleft: b(6), pgright: b(7), settings: b(9) };
+      ok: b(0), back: b(1), more: b(2), update: b(3), tabprev: b(4), tabnext: b(5), pgleft: b(6), pgright: b(7), settings: b(9), updates: b(8) };
     for (const [k, down] of Object.entries(keys)) {
       const key = p.index + k, t = held.get(key);
       if (!down) { held.delete(key); continue; }
@@ -726,7 +775,7 @@ setInterval(() => {
 
 // ---------- hints ----------
 function renderHints() {
-  const h = [['A', 'Play'], ['Y', 'Update'], ['X', 'More'], ['LB RB', 'Console'], ['Start', 'Settings'], ['Back+Start (hold)', 'Close game']];
+  const h = [['A', 'Play'], ['Y', 'Update'], ['X', 'More'], ['LB RB', 'Console'], ['Start', 'Settings'], ['Back', 'Updates'],['Back+Start (hold)', 'Close game']];
   $('#hints').replaceChildren(...h.map(([k, t]) => { const s = el('span'); s.append(el('kbd', '', k), t); return s; }));
 }
 

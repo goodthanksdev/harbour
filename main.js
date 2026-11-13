@@ -1359,8 +1359,16 @@ function parseSource(input) {
 async function latestEmulatorRelease(source, prerelease) {
   let list, page;
   if (source.type === 'github') {
-    list = await ghJson(`https://api.github.com/repos/${source.repo}/releases?per_page=10`);
     page = `https://github.com/${source.repo}/releases`;
+    // Stable track: ask GitHub for the latest stable release directly. Busy projects (PCSX2) publish
+    // so many test builds that a stable one may not be among the newest few.
+    if (!prerelease) {
+      try {
+        const rel = await ghJson(`https://api.github.com/repos/${source.repo}/releases/latest`);
+        return { tag: rel.tag_name, date: (rel.published_at || '').slice(0, 10), page: rel.html_url || page };
+      } catch (e) { if (!/GitHub 404/.test(e.message)) throw e; } // only test builds published: fall through
+    }
+    list = await ghJson(`https://api.github.com/repos/${source.repo}/releases?per_page=10`);
   } else {
     const r = await fetch(`https://${source.host}/api/v1/repos/${source.repo}/releases?limit=10`, { headers: { 'User-Agent': UA['User-Agent'] } });
     if (!r.ok) throw new Error(`${source.host} ${r.status}`);
