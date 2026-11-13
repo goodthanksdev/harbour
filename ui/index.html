@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Harbour</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' file: data:; media-src 'self' file:; style-src 'self' 'unsafe-inline'; script-src 'self'" />
+  <link rel="stylesheet" href="harbour.css" />
+</head>
+<body>
+  <!-- The big picture: artwork that cross-fades between games, then the game's video if it has one -->
+  <div id="hero" aria-hidden="true">
+    <div class="hero-layer" id="heroA"></div>
+    <div class="hero-layer" id="heroB"></div>
+    <video id="heroVideo" muted loop playsinline preload="none"></video>
+    <div class="hero-shade"></div>
+  </div>
+
+  <header id="top" class="chrome">
+    <div class="brand"><img src="assets/brand/harbour-mark.svg" alt="" /><span>HAR<b>BOUR</b></span></div>
+    <nav id="tabsView" aria-label="Consoles"><div id="tabs"></div></nav>
+    <div class="top-right">
+      <span id="updatePill" class="pill new" hidden></span>
+      <span id="clock"></span>
+      <button id="btnAdd" class="icon-btn" title="Add a game or emulator" aria-label="Add a game or emulator">＋</button>
+      <button id="btnSettings" class="icon-btn" title="Settings (Start)" aria-label="Settings">⚙</button>
+    </div>
+  </header>
+
+  <main id="info" class="chrome">
+    <div id="titleWrap"><img id="gLogo" alt="" hidden /><h1 id="gTitle"></h1></div>
+    <div id="gMeta" class="meta"></div>
+    <p id="gDesc"></p>
+    <div id="gActions" class="actions">
+      <button id="btnPlay" class="primary"><span class="tri"></span>Play</button>
+      <button id="btnUpdate" hidden></button>
+      <button id="btnMore" title="More (X)">•••</button>
+    </div>
+  </main>
+
+  <section id="rowWrap" class="chrome" aria-label="Games">
+    <div id="row" role="listbox"></div>
+    <div id="empty" hidden>No games here yet.</div>
+  </section>
+
+  <footer id="hints" class="chrome"></footer>
+
+  <div id="menu" class="popover" hidden role="menu"></div>
+
+  <dialog id="settings">
+    <h2>Settings</h2>
+    <div class="set-row"><span>Emulators</span><button id="setEmus">See and change your emulators</button></div>
+    <div class="set-row"><span>Artwork</span><button id="setArt">Download covers, backgrounds and logos</button></div>
+    <div class="set-row"><span>Game videos</span><button id="setVideos">Download a clip for every game</button></div>
+    <div class="set-row"><span>Recomp updates</span><button id="setCheck">Check now</button></div>
+    <div class="set-row"><span>Screensaver</span><select id="setIdle"><option value="0">Off</option><option value="60">After 1 minute</option><option value="120">After 2 minutes</option><option value="300">After 5 minutes</option></select></div>
+    <div class="set-row"><span>Game videos</span><select id="setSound"><option value="0">Muted</option><option value="1">With sound</option></select></div>
+    <div class="set-row"><span>UI sounds</span><select id="setUiSound"><option value="1">On</option><option value="0">Off</option></select></div>
+    <div class="set-row"><span>Window</span><button id="setFull">Toggle fullscreen (F11)</button></div>
+    <p class="note">Harbour is a modified version of PyroCade by Pyrodrifter (MIT licence).</p>
+    <div class="dlg-actions"><button id="setQuit">Quit Harbour</button><button id="setClose" class="primary">Close</button></div>
+  </dialog>
+
+  <!-- Your emulators, and which one each console uses -->
+  <dialog id="emusDlg">
+    <h2>Emulators</h2>
+    <h3>Which emulator each console uses</h3>
+    <div id="emuConsoles" class="emu-consoles"></div>
+    <h3>Your emulators</h3>
+    <div id="emuCards" class="emu-cards"></div>
+    <div class="dlg-actions"><button id="emusAdd">＋ Add an emulator</button><button id="emusClose" class="primary">Done</button></div>
+  </dialog>
+
+  <!-- Add a game or an emulator: one question at a time -->
+  <dialog id="addDlg">
+    <div id="addPick">
+      <h2>Add to Harbour</h2>
+      <div class="choices">
+        <button type="button" class="choice" data-kind="port"><b>PC port / recomp</b><span>A game that runs on its own, like Banjo Recompiled. Pick its folder.</span></button>
+        <button type="button" class="choice" data-kind="rom"><b>Game for an emulator</b><span>A game file (ROM, ISO, NSP, folder dump) that an emulator plays.</span></button>
+        <button type="button" class="choice" data-kind="emu"><b>Emulator</b><span>An emulator you already have, like Eden or PCSX2.</span></button>
+      </div>
+      <div class="dlg-actions"><button type="button" class="addCancel">Cancel</button></div>
+    </div>
+    <form id="addPort" hidden>
+      <h2>Add a PC port / recomp</h2>
+      <label>Console it's from (its shelf)<select name="platform"></select></label>
+      <label>Name <small>(leave empty to use the folder's name)</small><input name="title" placeholder="e.g. Banjo-Kazooie" autocomplete="off" spellcheck="false" /></label>
+      <label>GitHub page for updates <small>(optional)</small><input name="repo" placeholder="owner/name or its GitHub link" autocomplete="off" spellcheck="false" /></label>
+      <label class="check"><input type="checkbox" name="auto" /> Install updates for me</label>
+      <p class="note">Next you choose the game's folder. Harbour finds the program that starts it and gets its artwork and a gameplay clip.</p>
+      <div class="dlg-actions"><button type="button" class="addBack">Back</button><button class="primary">Choose folder…</button></div>
+    </form>
+    <form id="addRom" hidden>
+      <h2>Add a game for an emulator</h2>
+      <label>Console<select name="platform"></select></label>
+      <label>Emulator for this console<select name="emulator"></select></label>
+      <label>Name <small>(optional)</small><input name="title" autocomplete="off" spellcheck="false" /></label>
+      <p class="note">Next you choose the game's file. For a Switch folder dump, choose the file called "main" inside exefs.</p>
+      <div class="dlg-actions"><button type="button" class="addBack">Back</button><button class="primary">Choose file…</button></div>
+    </form>
+    <form id="addEmu" hidden>
+      <h2>Add an emulator</h2>
+      <label>Name <small>(optional)</small><input name="name" placeholder="e.g. PCSX2" autocomplete="off" spellcheck="false" /></label>
+      <label>Consoles it plays</label>
+      <div id="emuSystems" class="sys-grid"></div>
+      <label class="check"><input type="checkbox" name="makeDefault" checked /> Use it for those consoles</label>
+      <label>Launch options <small>(advanced: {rom} is the game file)</small><input name="args" value="{rom}" autocomplete="off" spellcheck="false" /></label>
+      <div class="dlg-actions"><button type="button" class="addBack">Back</button><button class="primary">Choose program…</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="renameDlg">
+    <h2>Rename</h2>
+    <form id="renameForm" method="dialog"><input name="title" autocomplete="off" spellcheck="false" />
+      <p class="note">This is also the name Harbour uses to find artwork and videos.</p>
+      <div class="dlg-actions"><button type="button" id="renameCancel">Cancel</button><button class="primary">Save</button></div></form>
+  </dialog>
+
+  <dialog id="recompDlg">
+    <h2>Platform &amp; updates</h2>
+    <p id="rdGame" class="note"></p>
+    <form id="rdForm" method="dialog">
+      <label>Shelf<select name="platform"></select></label>
+      <label>GitHub repository for updates<input name="repo" placeholder="owner/name" autocomplete="off" spellcheck="false" /></label>
+      <label class="check"><input type="checkbox" name="prerelease" /> Include test versions</label>
+      <label class="check"><input type="checkbox" name="auto" /> Install updates for me (checksum, Defender scan, backup, keeps settings)</label>
+      <label>Version you have now<input name="installedTag" placeholder="e.g. v1.0.3" autocomplete="off" spellcheck="false" /></label>
+      <label>Download file pattern (optional)<input name="asset" placeholder="only if it picks the wrong file" autocomplete="off" spellcheck="false" /></label>
+      <p id="rdStatus" class="note"></p>
+      <div class="dlg-actions"><button type="button" id="rdCancel">Cancel</button><button value="save" class="primary">Save</button></div>
+    </form>
+  </dialog>
+
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script src="ui-audio.js"></script>
+  <script src="harbour.js"></script>
+</body>
+</html>

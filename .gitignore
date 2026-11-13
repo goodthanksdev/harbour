@@ -1,0 +1,15 @@
+# Dependencies (Electron is installed with npm install)
+node_modules/
+
+# Your settings, artwork, game videos, video tools and logs: personal and large
+data/
+
+# Shortcut with paths to this PC
+Harbour.lnk
+
+# OS / editor
+Thumbs.db
+Desktop.ini
+.DS_Store
+.vscode/
+*.log
