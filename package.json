@@ -1,7 +1,7 @@
 {
   "name": "harbour",
   "version": "0.1.0",
-  "description": "Harbour: a game launcher for recomps, ports and emulators, based on PyroCade by Pyrodrifter.",
+  "description": "Harbour: a lightweight game launcher for recomps, ports and emulators.",
   "license": "MIT",
   "main": "main.js",
   "scripts": {
@@ -12,7 +12,7 @@
     "electron": "^39.0.0"
   },
   "author": {
-    "name": "Harbour (based on PyroCade by Pyrodrifter)"
+    "name": "goodthanksdev"
   },
   "productName": "Harbour"
 }

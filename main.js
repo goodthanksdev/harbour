@@ -1,5 +1,4 @@
 // Harbour: settings, library scanning, artwork, launching, recomp updates and game videos.
-// Based on PyroCade by Pyrodrifter (MIT licence); everything Harbour doesn't use has been taken out.
 const { app, BrowserWindow, ipcMain, dialog, shell, nativeImage } = require('electron');
 if (process.platform === 'win32') app.commandLine.appendSwitch('force-high-performance-gpu');
 app.setName('Harbour');

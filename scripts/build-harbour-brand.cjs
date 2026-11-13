@@ -30,7 +30,7 @@ const wordmarkSvg=svg('0 0 860 160',`<g transform="translate(0 6) scale(1.15)">$
 const bannerSvg=svg('0 0 1280 420',`<defs><linearGradient id="back" x2="1" y2="1"><stop stop-color="${C.navy1}"/><stop offset="1" stop-color="${C.navy3}"/></linearGradient></defs><rect width="1280" height="420" rx="24" fill="url(#back)"/>`+
   `<g transform="translate(103 80)">${iconSvg.replace(/^<svg[^>]*>/,'<svg width="256" height="256" viewBox="0 0 256 256">')}</g>${word(428,205,64)}`+
   `<text x="430" y="252" fill="#a9c1d6" font-family="Segoe UI,Arial,sans-serif" font-size="23">Every game, one harbour.</text>`+
-  `<text x="432" y="300" fill="#6f8aa3" font-family="Segoe UI,Arial,sans-serif" font-size="11" letter-spacing="2.1">RECOMPS  ·  PORTS  ·  EMULATORS  ·  BASED ON PYROCADE</text>`);
+  `<text x="432" y="300" fill="#6f8aa3" font-family="Segoe UI,Arial,sans-serif" font-size="11" letter-spacing="2.1">RECOMPS  ·  PORTS  ·  EMULATORS</text>`);
 const files={'harbour-mark.svg':markSvg,'harbour-mark-mono.svg':monoSvg,'harbour-icon.svg':iconSvg,'harbour-wordmark.svg':wordmarkSvg,'harbour-banner.svg':bannerSvg};
 for(const [name,data]of Object.entries(files))fs.writeFileSync(path.join(brand,name),data+'\n');
 

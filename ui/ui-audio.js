@@ -1,4 +1,4 @@
-// UI sounds. Soft synthesized blips by default (from PyroCade), no files needed.
+// UI sounds. Soft synthesized blips by default, no files needed.
 // To use your own: put move / tab / select / open / back / launch / error (.wav, .ogg or .mp3)
 // in ui\sounds\ and that sound replaces the built-in one.
 'use strict';

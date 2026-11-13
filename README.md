@@ -21,7 +21,3 @@ No AI at runtime: everything is plain rules and downloads.
 `npm install`, then `node_modules\electron\dist\electron.exe "<this folder>"` (or `npm start`).
 Settings, artwork, clips and logs live in `data\` (not in git). Your own UI sounds: drop `move`, `tab`, `select`,
 `open`, `back`, `launch` or `error` (.wav/.ogg/.mp3) into `ui\sounds\`. Logo and icons: `npm run brand:build`.
-
-## Credit
-Harbour started as a modified version of [PyroCade](https://github.com/Pyrodrifter/PyroCade) by Pyrodrifter
-(MIT licence, see `LICENSE`). Its interface was rebuilt from scratch and everything Harbour doesn't use was removed.
