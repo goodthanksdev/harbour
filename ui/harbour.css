@@ -168,3 +168,23 @@ button.danger:hover { border-color: #e06c64; color: #ff9d95; }
 
 /* Controller focus inside windows */
 dialog :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Volume sliders */
+.slider { display: flex; align-items: center; gap: 12px; }
+.slider input[type=range] { width: calc(240 * var(--u)); accent-color: var(--accent); }
+.slider output { min-width: 2.5em; text-align: right; color: var(--text); font-variant-numeric: tabular-nums; }
+
+/* Emulator badge: grey = missing, yellow = update, teal = up to date */
+.emu-badge, .emu-chip { --c: var(--accent); color: var(--c); }
+.emu-badge.missing, .emu-chip.missing { --c: #7d8896; }
+.emu-badge.update, .emu-chip.update { --c: var(--beam); }
+.emu-badge { position: absolute; right: calc(6 * var(--u)); bottom: calc(6 * var(--u)); width: calc(26 * var(--u)); height: calc(26 * var(--u));
+  display: grid; place-items: center; border-radius: 50%; background: rgba(6,11,20,.82); box-shadow: 0 0 0 1.5px var(--c), 0 2px 8px rgba(0,0,0,.5); }
+.emu-badge svg { width: 68%; height: 68%; }
+.emu-chip { display: inline-flex; align-items: center; gap: .35em; font-weight: 600; }
+.emu-chip svg { width: 1.15em; height: 1.15em; }
+.emu-update { display: grid; gap: 2px; }
+.emu-update small { color: var(--dim); font-size: .8em; }
+.emu-source { display: grid; gap: 8px; }
+.emu-source label { display: grid; gap: 4px; color: var(--muted); font-size: .9em; }
+.emu-source label.check { display: flex; align-items: center; gap: 8px; color: var(--text); }

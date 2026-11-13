@@ -63,6 +63,33 @@ function centerTab(instant = false) {
 }
 addEventListener('resize', () => { centerTab(true); select(S.sel, true); });
 
+// ---------- emulator badge ----------
+// On every game that runs through an emulator: grey = you don't have the emulator (or none is set),
+// yellow = the emulator has an update, Harbour teal = it's there and up to date.
+const EMU_ICON = 'M7 6h10a5 5 0 0 1 4.9 6l-.9 4.6a2.8 2.8 0 0 1-4.9 1.3L14.3 16H9.7l-1.8 1.9A2.8 2.8 0 0 1 3 16.6L2.1 12A5 5 0 0 1 7 6Zm.5 3v2h-2v1.6h2v2h1.6v-2h2V11h-2V9H7.5Zm8.8.6a1.1 1.1 0 1 0 0 2.2 1.1 1.1 0 0 0 0-2.2Zm-2.2 2.3a1.1 1.1 0 1 0 0 2.2 1.1 1.1 0 0 0 0-2.2Z';
+function emuInfo(g) {
+  if (!g || g.recomp) return null;
+  const sys = S.config.systems.find(s => s.id === g.system);
+  if (!sys || sys.direct) return null;
+  const emu = (S.emus || []).find(e => e.id === sys.emulator);
+  if (!emu) return { state: 'missing', text: 'No emulator yet (Settings → Emulators)' };
+  if (!emu.exe) return { state: 'missing', text: `${emu.name} not found (Settings → Emulators)` };
+  const st = S.emuStatus?.[emu.id];
+  if (st?.updateAvailable) return { state: 'update', text: `${emu.name}: ${st.latest.tag} available` };
+  return { state: 'ok', text: `via ${emu.name}` };
+}
+function emuBadge(info, cls, text) {
+  const b = el('span', `${cls} ${info.state}`); b.title = info.text;
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); svg.setAttribute('viewBox', '0 0 24 24');
+  const p = document.createElementNS('http://www.w3.org/2000/svg', 'path'); p.setAttribute('d', EMU_ICON); p.setAttribute('fill', 'currentColor');
+  svg.append(p); b.append(svg); if (text) b.append(text);
+  return b;
+}
+async function loadEmulators(force = false) {
+  S.emus = await api.emuList().catch(() => []);
+  S.emuStatus = await api.checkEmulators(force).catch(() => S.emuStatus || {});
+}
+
 // ---------- cover row ----------
 function renderRow() {
   const row = $('#row'); row.replaceChildren();
@@ -78,6 +105,8 @@ function renderRow() {
       it.style.setProperty('--c', sysOf(g.system).color || '#2a4a6a'); it.append(card);
     }
     if (g.favorite) it.append(el('span', 'fav', '★'));
+    const emu = emuInfo(g);
+    if (emu) it.append(emuBadge(emu, 'emu-badge'));
     it.onclick = () => select(i);
     it.ondblclick = () => play();
     row.append(it);
@@ -150,6 +179,7 @@ function startVideoSoon(g) {
   videoTimer = setTimeout(() => {
     const v = $('#heroVideo');
     v.src = `${g.media.video}?v=${S.videoBust || 0}`; v.muted = !S.config.harbourVideoSound; // ?v= so a rerolled clip isn't served from cache
+    v.volume = (S.config.harbourVideoVolume ?? 50) / 100;
     v.play().then(() => v.classList.add('on')).catch(() => {});
   }, 1600);
 }
@@ -166,9 +196,9 @@ function showGame(g) {
   for (const x of [g.info?.year, g.info?.developer, g.info?.genre, playTime(g),
     st?.installed?.tag && `Installed ${st.installed.tag}`]) if (x) meta.append(el('span', '', x));
   if (st?.updateAvailable) meta.append(el('span', 'upd', `${st.latest.tag} available`));
-  // A game file whose console has no emulator yet can't start: say so before Play is pressed.
-  const sys = S.config.systems.find(s => s.id === g.system);
-  if (!g.recomp && !sys?.direct && !sys?.emulator) meta.append(el('span', 'upd', 'Needs an emulator: Settings → Emulators'));
+  // Games that run through an emulator say which one, coloured by how it's doing.
+  const emu = emuInfo(g);
+  if (emu) meta.append(emuBadge(emu, 'emu-chip', emu.text));
   $('#gDesc').textContent = g.info?.description || '';
   const up = $('#btnUpdate');
   up.hidden = !st?.updateAvailable; up.className = 'new';
@@ -351,8 +381,8 @@ async function openEmulators() {
 async function renderEmulators() {
   S.config = await api.getConfig();
   const all = await api.emuList().catch(() => []);
-  // Only emulators you have: ones you added, and downloadable ones that are actually installed.
-  const mine = all.filter(e => e.custom || e.exe);
+  S.emus = all;
+  const mine = all;
   // Consoles worth listing: ones with games, or ones an emulator is set up for.
   const counts = {}; for (const g of S.games) counts[g.system] = (counts[g.system] || 0) + 1;
   const listed = consoles().filter(s => counts[s.id] || mine.some(e => (e.systems || []).includes(s.id)));
@@ -380,19 +410,48 @@ async function renderEmulators() {
     const used = S.config.systems.filter(s => s.emulator === e.id).map(s => s.id);
     for (const id of e.systems || []) chips.append(el('span', 'chip' + (used.includes(id) ? ' on' : ''), sysName(id)));
     if (!(e.systems || []).length) chips.append(el('span', 'note', 'No consoles chosen'));
+    // Updates: where they come from, the version you have, the newest one.
+    const st = S.emuStatus?.[e.id] || {};
+    const info = !e.exe ? { state: 'missing' } : st.updateAvailable ? { state: 'update' } : { state: 'ok' };
+    const where = st.source ? (st.source.type === 'github' ? st.source.repo : `${st.source.host}/${st.source.repo}`) : null;
+    const line = !where ? 'Updates: no source set, so Harbour can\'t tell when there\'s a new version.'
+      : `Updates from ${where} · you have ${st.installed || '?'} · newest ${st.latest?.tag || '?'}` + (st.error ? ' (couldn\'t check)' : '');
+    const upd = el('div', 'emu-update'); upd.append(emuBadge(info, 'emu-chip', st.updateAvailable ? `${st.latest.tag} available` : !e.exe ? 'Program missing' : where && st.installed ? 'Up to date' : 'Version unknown'), el('small', '', line));
     const btns = el('div', 'emu-btns');
     const b = (text, fn, cls = '') => { const x = el('button', cls, text); x.type = 'button'; x.onclick = fn; btns.append(x); };
     if (e.custom) b('Consoles…', () => editEmuConsoles(e, card));
+    b('Updates…', () => editEmuSource(e, st, card));
+    if (where) b('Release page', () => api.openEmulatorPage(e.id).catch(err => toast(err.message)));
+    if (st.updateAvailable) b("I've updated it", async () => { try { S.emuStatus[e.id] = await api.markEmulatorCurrent(e.id); UISound.play('select'); renderEmulators(); } catch (err) { toast(err.message); } });
     b('Change program…', async () => { const r = await api.emuPickExe(e.id).catch(err => toast(err.message)); if (r) { toast(`${e.name} now uses ${r.exe.split(/[\\/]/).pop()}.`); renderEmulators(); } });
     b('Open folder', () => api.emuOpenFolder(e.id).catch(err => toast(err.message)));
     if (e.custom) b('Remove', async () => {
       if (!confirm(`Remove ${e.name} from Harbour? Its files stay where they are; consoles that used it will have no emulator.`)) return;
       try { await api.emuRemove(e.id); UISound.play('back'); toast(`${e.name} removed.`); renderEmulators(); } catch (err) { toast(err.message); }
     }, 'danger');
-    card.append(head, chips, btns); return card;
+    card.append(head, chips, upd, btns); return card;
   });
   $('#emuCards').replaceChildren(...(cards.length ? cards : [el('p', 'note', 'No emulators yet. Add one below.')]));
   renderGameFolders();
+}
+// Where an emulator's updates come from, and which version you have.
+function editEmuSource(e, st, card) {
+  const form = el('div', 'emu-source');
+  const src = el('input'); src.placeholder = 'owner/name on GitHub, or a link to the project page';
+  src.value = st.source ? (st.source.type === 'github' ? st.source.repo : `${st.source.host}/${st.source.repo}`) : '';
+  const tag = el('input'); tag.placeholder = 'the version you have, e.g. v0.2.1'; tag.value = st.installed || '';
+  const pre = el('input'); pre.type = 'checkbox'; pre.checked = !!st.source?.prerelease;
+  const preLabel = el('label', 'check'); preLabel.append(pre, 'Include test versions');
+  const save = el('button', 'primary', 'Save'); save.type = 'button';
+  save.onclick = async () => {
+    try { S.emuStatus[e.id] = await api.setEmulatorSource({ id: e.id, source: src.value, prerelease: pre.checked, installedTag: tag.value }); UISound.play('select'); renderEmulators(); }
+    catch (err) { UISound.play('error'); toast(err.message, 6000); }
+  };
+  const l1 = el('label', '', 'Updates come from'), l2 = el('label', '', 'Version you have');
+  l1.append(src); l2.append(tag);
+  form.append(l1, l2, preLabel, save);
+  card.querySelector('.emu-btns').replaceWith(form);
+  src.focus();
 }
 // Game folders: one row per folder, with the console it feeds.
 function renderGameFolders() {
@@ -445,6 +504,8 @@ function editEmuConsoles(e, card) {
 }
 $('#setEmus').onclick = () => { $('#settings').close(); openEmulators(); };
 $('#emusClose').onclick = () => { UISound.play('back'); $('#emusDlg').close(); };
+// Changes made in there (emulators, versions) show on the covers' badges as soon as it closes.
+$('#emusDlg').addEventListener('close', () => { const id = S.list[S.sel]?.id; renderRow(); const i = S.list.findIndex(g => g.id === id); select(i >= 0 ? i : 0, true); });
 $('#emusAdd').onclick = async () => { $('#emusDlg').close(); await openAdd(); showAddStep('addEmu'); };
 
 // ---------- rename ----------
@@ -463,6 +524,7 @@ function openSettings() {
   $('#setIdle').value = String(S.config.harbourIdle ?? 120);
   $('#setSound').value = S.config.harbourVideoSound ? '1' : '0';
   $('#setUiSound').value = S.config.harbourUiSound === false ? '0' : '1';
+  $('#setUiVol').value = uiVolume(); $('#setVidVol').value = videoVolume(); showVolumes();
   $('#settings').showModal();
 }
 async function saveSetting(patch) {
@@ -475,6 +537,15 @@ $('#setQuit').onclick = () => api.quitApp();
 $('#setFull').onclick = () => api.isFullscreen().then(on => api.setFullscreen(!on));
 $('#setIdle').onchange = e => saveSetting({ harbourIdle: Number(e.target.value) });
 $('#setUiSound').onchange = e => { const on = e.target.value === '1'; saveSetting({ harbourUiSound: on }); UISound.configure({ enabled: on }); if (on) UISound.play('select'); };
+// Volumes are 0-100 and start at 50: loud enough to hear, never a blast at full.
+const uiVolume = () => S.config.harbourUiVolume ?? 50, videoVolume = () => S.config.harbourVideoVolume ?? 50;
+// The built-in blips are generated at 0.5 of full scale, so 50 here is the level they were made for.
+const applyUiVolume = () => UISound.configure({ volume: uiVolume() / 100 * .5 });
+const showVolumes = () => { $('#setUiVolOut').textContent = uiVolume(); $('#setVidVolOut').textContent = videoVolume(); };
+$('#setUiVol').oninput = e => { S.config.harbourUiVolume = Number(e.target.value); applyUiVolume(); showVolumes(); };
+$('#setUiVol').onchange = e => { saveSetting({ harbourUiVolume: Number(e.target.value) }); UISound.play('select'); };
+$('#setVidVol').oninput = e => { S.config.harbourVideoVolume = Number(e.target.value); $('#heroVideo').volume = videoVolume() / 100; showVolumes(); };
+$('#setVidVol').onchange = e => saveSetting({ harbourVideoVolume: Number(e.target.value) });
 $('#setSound').onchange = e => { saveSetting({ harbourVideoSound: e.target.value === '1' }); $('#heroVideo').muted = e.target.value !== '1'; };
 $('#setCheck').onclick = () => { $('#settings').close(); toast('Checking for updates…'); checkUpdates(true); };
 $('#setArt').onclick = () => { $('#settings').close(); downloadArt('library'); };
@@ -527,6 +598,11 @@ function dialogAct(dlg, a) {
   if (a === 'back') { UISound.play('back'); dlg.close(); return; }
   if (a === 'up' || a === 'tabprev') return focusAt(cur < 0 ? 0 : cur - 1);
   if (a === 'down' || a === 'tabnext') return focusAt(cur + 1);
+  if ((a === 'left' || a === 'right') && el2?.type === 'range') { // sliders: left/right move them
+    const step = Number(el2.step) || 1, v = Math.max(Number(el2.min), Math.min(Number(el2.max), Number(el2.value) + (a === 'right' ? step : -step)));
+    if (v !== Number(el2.value)) { el2.value = v; el2.dispatchEvent(new Event('input', { bubbles: true })); el2.dispatchEvent(new Event('change', { bubbles: true })); }
+    return;
+  }
   if ((a === 'left' || a === 'right') && el2?.tagName === 'SELECT') {
     const n = el2.options.length, i = Math.max(0, Math.min(n - 1, el2.selectedIndex + (a === 'right' ? 1 : -1)));
     if (i !== el2.selectedIndex) { el2.selectedIndex = i; el2.dispatchEvent(new Event('change', { bubbles: true })); UISound.play('move'); }
@@ -665,6 +741,7 @@ async function reload() {
 async function init() {
   S.config = await api.getConfig();
   UISound.configure({ enabled: S.config.harbourUiSound !== false });
+  applyUiVolume();
   S.uiState = await api.libraryUi().catch(() => ({}));
   S.tab = S.uiState?.system || 'all';
   renderHints();
@@ -674,6 +751,8 @@ async function init() {
   // Rescan behind the cached library; redraw only if something changed.
   api.scan(false, { onlyIfChanged: true }).then(fresh => { if (fresh) { const id = S.list[S.sel]?.id; S.games = fresh; buildTabs(); setTab(S.tab, true); const i = S.list.findIndex(g => g.id === id); if (i >= 0) select(i, true); } }).catch(() => {});
   if (S.games.some(g => g.recomp)) checkUpdates(false);
+  // Emulator badges: draw them once the emulators' update checks are in.
+  loadEmulators().then(() => { const id = S.list[S.sel]?.id; renderRow(); const i = S.list.findIndex(g => g.id === id); select(i >= 0 ? i : 0, true); });
   if (S.games.length && !S.games.some(g => g.media?.fanart || g.media?.front)) toast('No artwork yet: open Settings (Start) → Download covers, backgrounds and logos.', 8000);
   api.onToast?.(m => toast(m, 5000));
   // Descriptions, years and developers arrive from the LaunchBox database after the library shows.

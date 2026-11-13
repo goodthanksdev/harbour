@@ -1343,6 +1343,82 @@ handle('harbour:removeGameFolder', ({ system, folder }) => {
   saveConfig(config);
   return true;
 });
+// ---------- Emulator updates ----------
+// An emulator can have an update source: a GitHub repository ("owner/name") or one on another
+// Forgejo/Gitea site ("git.eden-emu.dev/eden-emu/eden"). Harbour only tells you about new versions;
+// emulators update with their own updater or by hand, then "I've updated it" records the version.
+function parseSource(input) {
+  const text = String(input || '').trim().replace(/^https?:\/\//i, '').replace(/\.git$/i, '').replace(/\/+$/, '');
+  if (!text) return null;
+  const m = text.match(/^(?:(?:www\.)?github\.com\/)?([\w.-]+\/[\w.-]+)$/i);
+  if (m) return { type: 'github', repo: parseRepo(m[1]) };
+  const f = text.match(/^([a-z0-9.-]+\.[a-z]{2,})\/([\w.-]+\/[\w.-]+)(?:\/.*)?$/i);
+  if (f) return { type: 'forgejo', host: f[1].toLowerCase(), repo: f[2] };
+  throw new Error('Enter a GitHub repository (owner/name) or a link to the project page.');
+}
+async function latestEmulatorRelease(source, prerelease) {
+  let list, page;
+  if (source.type === 'github') {
+    list = await ghJson(`https://api.github.com/repos/${source.repo}/releases?per_page=10`);
+    page = `https://github.com/${source.repo}/releases`;
+  } else {
+    const r = await fetch(`https://${source.host}/api/v1/repos/${source.repo}/releases?limit=10`, { headers: { 'User-Agent': UA['User-Agent'] } });
+    if (!r.ok) throw new Error(`${source.host} ${r.status}`);
+    list = await r.json();
+    page = `https://${source.host}/${source.repo}/releases`;
+  }
+  const rel = list.find(x => !x.draft && (prerelease || !x.prerelease)) || list.find(x => !x.draft);
+  if (!rel) throw new Error(`${source.repo} has no releases.`);
+  return { tag: rel.tag_name, date: (rel.published_at || '').slice(0, 10), page: rel.html_url || page };
+}
+function emulatorUpdateStatus(e, latest, error) {
+  const installed = e.installed?.tag || null;
+  return { id: e.id, source: e.source || null, installed, latest: latest || null, error: error || null,
+    updateAvailable: latest && installed ? latest.tag !== installed : null };
+}
+async function checkEmulator(id, force = false) {
+  const e = config.customEmulators.find(x => x.id === id);
+  if (!e) throw new Error('Unknown emulator.');
+  if (!e.source) return emulatorUpdateStatus(e);
+  const key = 'emu:' + id, hit = recompChecks.get(key), sig = JSON.stringify(e.source);
+  if (!force && hit && hit.repo === sig && Date.now() - hit.at < RECOMP_CHECK_MS) return emulatorUpdateStatus(e, hit.latest);
+  try {
+    const latest = await latestEmulatorRelease(e.source, e.source.prerelease);
+    recompChecks.set(key, { at: Date.now(), latest, repo: sig }); saveRecompChecks();
+    return emulatorUpdateStatus(e, latest);
+  } catch (err) { return emulatorUpdateStatus(e, hit?.latest, err.message); }
+}
+handle('harbour:setEmulatorSource', ({ id, source, prerelease, installedTag }) => {
+  const e = config.customEmulators.find(x => x.id === id);
+  if (!e) throw new Error('Unknown emulator.');
+  const parsed = parseSource(source);
+  e.source = parsed ? { ...parsed, prerelease: !!prerelease } : undefined;
+  const tag = String(installedTag || '').trim();
+  e.installed = tag ? { tag } : undefined;
+  recompChecks.delete('emu:' + id);
+  saveConfig(config);
+  return checkEmulator(id, true);
+});
+handle('harbour:checkEmulators', async force => {
+  const out = {};
+  await mapLimit(config.customEmulators, 4, async e => { out[e.id] = await checkEmulator(e.id, !!force); });
+  return out;
+});
+handle('harbour:markEmulatorCurrent', id => {
+  const e = config.customEmulators.find(x => x.id === id);
+  const hit = recompChecks.get('emu:' + id);
+  if (!e || !hit?.latest) throw new Error('Check for an update first.');
+  e.installed = { tag: hit.latest.tag };
+  saveConfig(config);
+  return emulatorUpdateStatus(e, hit.latest);
+});
+handle('harbour:openEmulatorPage', async id => {
+  const e = config.customEmulators.find(x => x.id === id);
+  const page = recompChecks.get('emu:' + id)?.latest?.page || (e?.source && (e.source.type === 'github' ? `https://github.com/${e.source.repo}/releases` : `https://${e.source.host}/${e.source.repo}/releases`));
+  if (!page || !/^https:\/\//.test(page)) throw new Error('No update source set for this emulator.');
+  await shell.openExternal(page);
+  return true;
+});
 // Which emulator a console uses (an emulator id, or '' for none).
 handle('harbour:setSystemEmulator', ({ system, emulator }) => {
   const sys = config.systems.find(s => s.id === system);
