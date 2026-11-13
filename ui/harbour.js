@@ -11,6 +11,27 @@ const S = {
 
 // ---------- toast ----------
 let toastTimer;
+// Activity chips (top right): set() while a download/update runs, done() shows a tick, fail() a cross, then they fade away.
+const Activity = {
+  els: {},
+  el(id) {
+    let e = this.els[id];
+    if (!e) { e = this.els[id] = document.createElement('div'); e.className = 'act in'; e.innerHTML = '<span class="ico"></span><span class="txt"></span><span class="bar"></span>'; $('#activity').append(e); }
+    clearTimeout(e._t); e.classList.remove('out'); return e;
+  },
+  set(id, text, pct) {
+    const e = this.el(id); e.classList.add('busy'); e.classList.remove('ok', 'bad');
+    e.querySelector('.ico').textContent = ''; e.querySelector('.txt').textContent = text;
+    e.querySelector('.bar').style.width = pct > 0 && pct < 1 ? `${Math.round(pct * 100)}%` : '0';
+  },
+  end(id, text, cls, mark, ms) {
+    const e = this.el(id); e.classList.remove('busy', 'ok', 'bad'); e.classList.add(cls);
+    e.querySelector('.ico').textContent = mark; e.querySelector('.txt').textContent = text; e.querySelector('.bar').style.width = '0';
+    e._t = setTimeout(() => { e.classList.add('out'); e._t = setTimeout(() => { e.remove(); delete this.els[id]; }, 450); }, ms);
+  },
+  done(id, text) { this.end(id, text, 'ok', '✓', 2600); },
+  fail(id, text) { this.end(id, text, 'bad', '!', 6000); },
+};
 function toast(msg, ms = 3200) { const t = $('#toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('on'), ms); }
 
 // ---------- library ----------
@@ -149,8 +170,9 @@ function afterUpdates() { refreshBadges(); renderRow(); select(S.sel, true); if 
 async function updateOne(u) {
   if (updating) return toast('An update is already running.');
   updating = true;
-  try { S.recomp[u.id] = await api.recompUpdate(u.id); UISound.play('select'); toast(`${u.name} updated to ${u.to}.`, 5000); }
-  catch (e) { UISound.play('error'); toast(`${u.name}: ${e.message}`, 7000); }
+  S.updatingName = u.name; Activity.set('update', `Updating ${u.name}…`);
+  try { S.recomp[u.id] = await api.recompUpdate(u.id); UISound.play('select'); Activity.done('update', `${u.name} updated to ${u.to}`); }
+  catch (e) { UISound.play('error'); Activity.fail('update', `${u.name}: ${e.message}`); }
   finally { updating = false; afterUpdates(); }
 }
 $('#updAll').onclick = async () => {
@@ -272,17 +294,19 @@ async function update(g = S.list[S.sel]) {
   if (!st.auto) { api.recompOpenPage(g.id).then(() => toast("Release page opened. After updating, choose \"I've updated it\" in •••.", 6000)).catch(e => toast(e.message)); return; }
   if (updating) return toast('An update is already running.');
   updating = true;
+  S.updatingName = g.title; Activity.set('update', `Updating ${g.title}…`);
   try {
     const r = await api.recompUpdate(g.id);
     S.recomp[g.id] = r; refreshBadges(); showGame(S.list[S.sel]);
-    toast(`${g.title} updated to ${r.latest.tag}.` + (r.kept?.length ? ` Kept ${r.kept.length} settings file${r.kept.length === 1 ? '' : 's'}.` : ''), 7000);
-  } catch (e) { toast(e.message, 7000); }
+    Activity.done('update', `${g.title} updated to ${r.latest.tag}` + (r.kept?.length ? ` · kept ${r.kept.length} settings file${r.kept.length === 1 ? '' : 's'}` : ''));
+  } catch (e) { Activity.fail('update', `${g.title}: ${e.message}`); }
   finally { updating = false; }
 }
 async function checkUpdates(force = false) {
-  try { Object.assign(S.recomp, await api.recompCheckAll(force)); } catch { return; }
+  if (force) Activity.set('check', 'Checking for updates…');
+  try { Object.assign(S.recomp, await api.recompCheckAll(force)); } catch (e) { if (force) Activity.fail('check', `Update check failed: ${e.message}`); return; }
   refreshBadges(); showGame(S.list[S.sel]);
-  if (force) { const n = Object.values(S.recomp).filter(x => x.updateAvailable).length; toast(n ? `${n} update${n === 1 ? '' : 's'} available.` : 'Everything is up to date.'); }
+  if (force) { const n = Object.values(S.recomp).filter(x => x.updateAvailable).length; Activity.done('check', n ? `${n} update${n === 1 ? '' : 's'} available` : 'Everything is up to date'); }
 }
 
 // ---------- ••• menu ----------
@@ -595,7 +619,7 @@ $('#setUiVol').onchange = e => { saveSetting({ harbourUiVolume: Number(e.target.
 $('#setVidVol').oninput = e => { S.config.harbourVideoVolume = Number(e.target.value); $('#heroVideo').volume = videoVolume() / 100; showVolumes(); };
 $('#setVidVol').onchange = e => saveSetting({ harbourVideoVolume: Number(e.target.value) });
 $('#setSound').onchange = e => { saveSetting({ harbourVideoSound: e.target.value === '1' }); $('#heroVideo').muted = e.target.value !== '1'; };
-$('#setCheck').onclick = () => { $('#settings').close(); toast('Checking for updates…'); checkUpdates(true); };
+$('#setCheck').onclick = () => { $('#settings').close(); checkUpdates(true); };
 $('#setArt').onclick = () => { $('#settings').close(); downloadArt('library'); };
 $('#setVideos').onclick = () => { $('#settings').close(); downloadVideos('library'); };
 async function downloadVideos(scope, gameId, mode = 'missing') {
@@ -603,29 +627,34 @@ async function downloadVideos(scope, gameId, mode = 'missing') {
   if (mode !== 'missing') { S.videoJob = scope === 'game' ? gameId : 'library'; stopVideo(); }
   try {
     await api.videoStart({ scope, gameId, mode });
-    toast(mode === 'reroll' ? 'Rerolling the clip…' : mode === 'new' ? 'Looking for a different longplay…' : 'Getting game videos…', 5000);
-  } catch (e) { S.videoJob = null; UISound.play('error'); toast(e.message, 5000); startVideoSoon(S.list[S.sel]); }
+    Activity.set('video', mode === 'reroll' ? 'Rerolling the clip…' : mode === 'new' ? 'Finding a different longplay…' : 'Getting game videos…');
+  } catch (e) { S.videoJob = null; UISound.play('error'); Activity.fail('video', e.message); startVideoSoon(S.list[S.sel]); }
 }
 api.onVideoProgress?.(job => {
   if (job && job.status !== 'running') S.videoJob = null; // finished: clips can play again
   if (!job) return;
-  if (job.status === 'running') { toast(job.total > 1 && job.done ? `Videos: ${job.done} of ${job.total} · ${job.stage}` : job.stage, 5000); return; }
-  if (job.status === 'failed') { toast('Videos stopped: ' + job.stage, 8000); startVideoSoon(S.list[S.sel]); return; }
-  toast(job.total === 1 ? (job.saved ? 'New clip ready.' : job.failed ? `Couldn't get a clip: ${job.errors?.[0]?.split(': ').slice(1).join(': ') || 'unknown error'}` : 'No gameplay video found for this game.')
-    : `Videos done: ${job.saved} saved` + (job.noLink ? `, ${job.noLink} had no video link` : '') + (job.failed ? `, ${job.failed} failed` : '') + '.', 8000);
+  if (job.status === 'running') { Activity.set('video', job.total > 1 ? `Videos ${job.done || 0} of ${job.total} · ${job.stage}` : job.stage, job.total > 1 ? (job.done || 0) / job.total : 0); return; }
+  if (job.status === 'failed') { Activity.fail('video', 'Videos stopped: ' + job.stage); startVideoSoon(S.list[S.sel]); return; }
+  if (job.total === 1) {
+    if (job.saved) Activity.done('video', 'New clip ready');
+    else Activity.fail('video', job.failed ? `Couldn't get a clip: ${job.errors?.[0]?.split(': ').slice(1).join(': ') || 'unknown error'}` : 'No gameplay video found');
+  } else {
+    const msg = `Videos done: ${job.saved} saved` + (job.noLink ? `, ${job.noLink} had no link` : '') + (job.failed ? `, ${job.failed} failed` : '');
+    job.failed && !job.saved ? Activity.fail('video', msg) : Activity.done('video', msg);
+  }
   S.videoBust = Date.now();
   reload().then(() => { if (job.total === 1) startVideoSoon(S.list[S.sel]); });
 });
 async function downloadArt(scope, gameId) {
   if (S.artBusy) return toast('Artwork is already downloading.');
-  try { await api.artStart({ scope, gameId, types: ['front', 'fanart', 'logo', 'screenshot'], retryMissing: true, upgrade: false }); S.artBusy = true; toast('Downloading artwork…'); }
-  catch (e) { toast(e.message, 5000); }
+  try { await api.artStart({ scope, gameId, types: ['front', 'fanart', 'logo', 'screenshot'], retryMissing: true, upgrade: false }); S.artBusy = true; Activity.set('art', 'Downloading artwork…'); }
+  catch (e) { Activity.fail('art', e.message); }
 }
 api.onArtProgress?.(job => {
   if (!job) return;
-  if (job.status === 'running') { if (job.total > 1) toast(`Artwork: ${job.completed} of ${job.total} · ${job.lastTitle || ''}`, 4000); return; }
+  if (job.status === 'running') { if (job.total > 1) Activity.set('art', `Artwork ${job.completed} of ${job.total}` + (job.lastTitle ? ` · ${job.lastTitle}` : ''), job.completed / job.total); return; }
   if (S.artBusy) {
-    S.artBusy = false; toast(`Artwork done: ${job.downloaded} new image${job.downloaded === 1 ? '' : 's'}.`, 5000);
+    S.artBusy = false; Activity.done('art', `Artwork done: ${job.downloaded} new image${job.downloaded === 1 ? '' : 's'}`);
     reload().then(() => { const next = S.afterArt; S.afterArt = null; next?.(); });
   }
 });
@@ -809,7 +838,8 @@ async function init() {
     for (const c of changed || []) { const g = S.games.find(x => x.id === c.gameId); if (g) g.info = c.info; }
     showGame(S.list[S.sel]);
   });
-  api.onRecompProgress?.(p => toast(p.done ? 'Update installed.' : `${p.stage}${p.pct && p.pct < 1 ? ` ${Math.round(p.pct * 100)}%` : ''}`, 4000));
+  // The finished tick comes from updateOne()/update(), which know the new version.
+  api.onRecompProgress?.(p => { if (!p.done) Activity.set('update', `${S.updatingName ? S.updatingName + ': ' : ''}${p.stage}${p.pct && p.pct < 1 ? ` ${Math.round(p.pct * 100)}%` : ''}`, p.pct); });
   setFrozen();
 }
 init().catch(e => toast('Harbour failed to start: ' + e.message, 10000));
