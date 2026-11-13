@@ -17,7 +17,8 @@ const CLIP_FROM = .06, CLIP_TO = .50;
 const HD_TITLE = /\b(hd|1080p?|1440p?|2160p?|4k|uhd|60\s?fps|upscaled?)\b/i;
 // Words that don't help tell one game's video from another's.
 const STOP = new Set(['the', 'of', 'a', 'an', 'and', 'in', 'on', 'to', 'for', 'mods', 'edition', 'remake', 'hd']);
-const words = s => String(s || '').toLowerCase().replace(/\(.*?\)/g, ' ').replace(/[^a-z0-9]+/g, ' ').split(' ').filter(w => w && !STOP.has(w));
+// Apostrophes join words ("Bowser's" -> "bowsers"), so a title with one still matches.
+const words = s => String(s || '').toLowerCase().replace(/\(.*?\)/g, ' ').replace(/['’]/g, '').replace(/[^a-z0-9]+/g, ' ').split(' ').filter(w => w && !STOP.has(w));
 // A search result belongs to the game only when every word of the game's title is in the video title
 // ("Vice City" is not "Vice City Stories"), and the video names no sequel number the game doesn't have
 // ("Gears of War 3" is not "Gears of War 2").
@@ -31,11 +32,13 @@ const CONSOLES = { n64: ['n64', 'nintendo 64'], '3ds': ['3ds', '3d'], gc: ['game
   ps4: ['ps4', 'playstation 4'], ps5: ['ps5', 'playstation 5'], psp: ['psp'], xbox: ['xbox', 'og xbox'], x360: ['xbox 360', 'x360', '360'], xone: ['xbox one'],
   pc: ['pc', 'steam'], snes: ['snes'], nes: ['nes'], gba: ['gba'], ds: ['nds'], dreamcast: ['dreamcast'] };
 const OWN = { n64: ['n64'], switch: ['switch'], switch2: ['switch2', 'switch'], ps2: ['ps2'], ps4: ['ps4'], xbox: ['xbox'], x360: ['x360', 'xbox'] };
-function otherConsole(videoTitle, systemId) {
-  const t = ' ' + String(videoTitle).toLowerCase().replace(/[^a-z0-9]+/g, ' ') + ' ';
-  const own = new Set(OWN[systemId] || [systemId]);
-  // Longer names first, so "xbox 360" is read as one console and not also as "xbox".
-  const found = Object.entries(CONSOLES).flatMap(([id, names]) => names.map(n => [id, n])).sort((a, b) => b[1].length - a[1].length);
+function otherConsole(videoTitle, systemId, gameTitle = '') {
+  const flat = s => ' ' + String(s).toLowerCase().replace(/['’]/g, '').replace(/[^a-z0-9]+/g, ' ') + ' ';
+  const t = flat(videoTitle), own = new Set(OWN[systemId] || [systemId]), title = flat(gameTitle);
+  // Longer names first, so "xbox 360" is read as one console and not also as "xbox". A name that's
+  // part of the game's own title ("Super Mario 3D World") is the game, not another console.
+  const found = Object.entries(CONSOLES).flatMap(([id, names]) => names.map(n => [id, n]))
+    .filter(([, n]) => !title.includes(` ${n} `)).sort((a, b) => b[1].length - a[1].length);
   let rest = t;
   for (const [id, n] of found) if (rest.includes(` ${n} `)) { if (!own.has(id)) return true; rest = rest.split(` ${n} `).join(' '); }
   return false;
@@ -126,7 +129,7 @@ function createVideoService({ dataDir, ghJson, download, extract, sha256File, de
     // Another game in the library whose (longer) title the video matches better gets it instead:
     // "Banjo-Kazooie: Nuts & Bolts Longplay" is not a Banjo-Kazooie video.
     const others = getGames().filter(o => o.id !== g.id && words(o.title).length > words(g.title).length);
-    const fits = v => v?.id && v.duration >= 8 * 60 && matches(g.title, v.title, system) && !otherConsole(v.title, g.system) &&
+    const fits = v => v?.id && v.duration >= 8 * 60 && matches(g.title, v.title, system) && !otherConsole(v.title, g.system, g.title) &&
       !others.some(o => matches(o.title, v.title, getSystemName(o.system))) &&
       // No trailers, reviews or talking: "no commentary" is fine, any other mention of commentary isn't.
       !/trailer|review|top \d+|reaction|explained|speedrun|tier list|commentary|let'?s play/i.test(v.title.replace(/(no|without)[- ]commentary|commentary[- ]free/ig, ''));

@@ -18,6 +18,8 @@ contextBridge.exposeInMainWorld('api', {
   saveLibraryUi: patch => call('library:saveUi', patch),
   onLibraryInfo: on('library:info'),
   pickFolder: title => call('dialog:folder', title),
+  addGameFolder: options => call('harbour:addGameFolder', options),
+  removeGameFolder: options => call('harbour:removeGameFolder', options),
   // games
   launch: (id, options) => call('game:launch', id, options),
   quitGame: () => call('game:quit'),

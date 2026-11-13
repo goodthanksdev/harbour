@@ -48,7 +48,7 @@
 
   <dialog id="settings">
     <h2>Settings</h2>
-    <div class="set-row"><span>Emulators</span><button id="setEmus">See and change your emulators</button></div>
+    <div class="set-row"><span>Emulators &amp; game folders</span><button id="setEmus">See and change</button></div>
     <div class="set-row"><span>Artwork</span><button id="setArt">Download covers, backgrounds and logos</button></div>
     <div class="set-row"><span>Game videos</span><button id="setVideos">Download a clip for every game</button></div>
     <div class="set-row"><span>Recomp updates</span><button id="setCheck">Check now</button></div>
@@ -56,15 +56,22 @@
     <div class="set-row"><span>Game videos</span><select id="setSound"><option value="0">Muted</option><option value="1">With sound</option></select></div>
     <div class="set-row"><span>UI sounds</span><select id="setUiSound"><option value="1">On</option><option value="0">Off</option></select></div>
     <div class="set-row"><span>Window</span><button id="setFull">Toggle fullscreen (F11)</button></div>
-    <p class="note">Harbour is a modified version of PyroCade by Pyrodrifter (MIT licence).</p>
+    <p class="note">Harbour started from PyroCade by Pyrodrifter (MIT licence).</p>
     <div class="dlg-actions"><button id="setQuit">Quit Harbour</button><button id="setClose" class="primary">Close</button></div>
   </dialog>
 
   <!-- Your emulators, and which one each console uses -->
   <dialog id="emusDlg">
-    <h2>Emulators</h2>
+    <h2>Emulators &amp; game folders</h2>
     <h3>Which emulator each console uses</h3>
     <div id="emuConsoles" class="emu-consoles"></div>
+    <h3>Game folders</h3>
+    <p class="note">Folders of game files (ROMs, ISOs, NSPs). New games in them show up by themselves. A game you also have as a PC port only shows once.</p>
+    <div id="gameFolders" class="game-folders"></div>
+    <div class="emu-btns">
+      <button id="addGamesRoot" type="button">＋ Add your games folder (finds N64, PS2, Switch… inside)</button>
+      <select id="folderConsole" aria-label="Console"></select><button id="addConsoleFolder" type="button">＋ Folder for this console</button>
+    </div>
     <h3>Your emulators</h3>
     <div id="emuCards" class="emu-cards"></div>
     <div class="dlg-actions"><button id="emusAdd">＋ Add an emulator</button><button id="emusClose" class="primary">Done</button></div>

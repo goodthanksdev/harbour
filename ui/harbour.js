@@ -166,6 +166,9 @@ function showGame(g) {
   for (const x of [g.info?.year, g.info?.developer, g.info?.genre, playTime(g),
     st?.installed?.tag && `Installed ${st.installed.tag}`]) if (x) meta.append(el('span', '', x));
   if (st?.updateAvailable) meta.append(el('span', 'upd', `${st.latest.tag} available`));
+  // A game file whose console has no emulator yet can't start: say so before Play is pressed.
+  const sys = S.config.systems.find(s => s.id === g.system);
+  if (!g.recomp && !sys?.direct && !sys?.emulator) meta.append(el('span', 'upd', 'Needs an emulator: Settings → Emulators'));
   $('#gDesc').textContent = g.info?.description || '';
   const up = $('#btnUpdate');
   up.hidden = !st?.updateAvailable; up.className = 'new';
@@ -240,7 +243,7 @@ let editing = null;
 async function openRecompDialog(g) {
   const cur = await api.recompGet(g.id).catch(e => { toast(e.message); return null; }); if (!cur) return;
   editing = g; const f = $('#rdForm');
-  f.platform.replaceChildren(...[{ id: '', name: 'Recomp shelf' }, ...S.config.systems.filter(s => s.id !== 'recomp' && s.id !== 'pc')].map(s => { const o = el('option', '', s.name); o.value = s.id; return o; }));
+  f.platform.replaceChildren(...[{ id: '', name: 'Recomp shelf' }, ...consoles()].map(s => { const o = el('option', '', s.name); o.value = s.id; return o; }));
   f.platform.value = cur.platform || ''; f.repo.value = cur.source?.repo || ''; f.prerelease.checked = !!cur.source?.prerelease;
   f.auto.checked = !!cur.source?.auto; f.asset.value = cur.source?.asset || ''; f.installedTag.value = cur.installed?.tag || '';
   $('#rdGame').textContent = g.title; const st = S.recomp[g.id];
@@ -389,7 +392,44 @@ async function renderEmulators() {
     card.append(head, chips, btns); return card;
   });
   $('#emuCards').replaceChildren(...(cards.length ? cards : [el('p', 'note', 'No emulators yet. Add one below.')]));
+  renderGameFolders();
 }
+// Game folders: one row per folder, with the console it feeds.
+function renderGameFolders() {
+  const rows = [];
+  for (const s of S.config.systems) for (const dir of String(s.romDir || '').split('|').map(d => d.trim()).filter(Boolean)) {
+    const row = el('div', 'folder-row');
+    const x = el('button', 'danger', 'Remove'); x.type = 'button';
+    x.onclick = async () => {
+      try { await api.removeGameFolder({ system: s.id, folder: dir }); UISound.play('back'); await reload(); renderEmulators(); toast(`${sysName(s.id)} folder removed. Its games are no longer listed (the files are untouched).`, 6000); }
+      catch (e) { toast(e.message); }
+    };
+    row.append(el('b', '', sysName(s.id)), el('span', '', dir), x);
+    rows.push(row);
+  }
+  $('#gameFolders').replaceChildren(...(rows.length ? rows : [el('p', 'note', 'No game folders yet.')]));
+  const pick = $('#folderConsole');
+  if (!pick.options.length) pick.replaceChildren(...consoles().map(s => option(s.id, s.name)));
+}
+async function addGameFolder(system) {
+  try {
+    const r = await api.addGameFolder({ system });
+    if (!r) return;
+    if (!r.added.length) return toast('That folder is already there.');
+    UISound.play('select');
+    toast(`Added ${r.added.map(a => sysName(a.system)).join(', ')}. Finding games…`, 5000);
+    S.config = await api.getConfig();
+    await reload(); renderEmulators();
+    const missing = [...new Set(r.added.map(a => a.system))].filter(id => !S.config.systems.find(s => s.id === id)?.emulator);
+    if (missing.length) toast(`Pick an emulator for ${missing.map(sysName).join(', ')} above so those games can start.`, 8000);
+    const fresh = S.games.filter(g => r.added.some(a => a.system === g.system) && !g.media?.front && !g.recomp);
+    // New games get their artwork, then a gameplay clip each, without being asked.
+    if (fresh.length) { S.afterArt = () => downloadVideos('library', '', 'missing'); await downloadArt('library'); }
+  } catch (e) { UISound.play('error'); toast(e.message, 7000); }
+}
+$('#addGamesRoot').onclick = () => addGameFolder('');
+$('#addConsoleFolder').onclick = () => addGameFolder($('#folderConsole').value);
+
 function editEmuConsoles(e, card) {
   const box = el('div', 'sys-grid');
   for (const s of consoles()) { const l = el('label', 'check'); const c = el('input'); c.type = 'checkbox'; c.value = s.id; c.checked = (e.systems || []).includes(s.id); l.append(c, s.name); box.append(l); }
@@ -465,7 +505,10 @@ async function downloadArt(scope, gameId) {
 api.onArtProgress?.(job => {
   if (!job) return;
   if (job.status === 'running') { if (job.total > 1) toast(`Artwork: ${job.completed} of ${job.total} · ${job.lastTitle || ''}`, 4000); return; }
-  if (S.artBusy) { S.artBusy = false; toast(`Artwork done: ${job.downloaded} new image${job.downloaded === 1 ? '' : 's'}.`, 5000); reload(); }
+  if (S.artBusy) {
+    S.artBusy = false; toast(`Artwork done: ${job.downloaded} new image${job.downloaded === 1 ? '' : 's'}.`, 5000);
+    reload().then(() => { const next = S.afterArt; S.afterArt = null; next?.(); });
+  }
 });
 
 // ---------- input: keyboard, mouse, controller ----------
@@ -474,11 +517,35 @@ function poke() {
   if (S.ambient) { S.ambient = false; document.body.classList.remove('ambient'); return true; } // the first input only wakes it
   return false;
 }
+// Windows (Settings, Add, Emulators, Platform & updates, Rename) with a controller: up/down move
+// between the controls, left/right change a dropdown, A presses or ticks, B closes.
+function dialogAct(dlg, a) {
+  const controls = [...dlg.querySelectorAll('button, select, input')].filter(e => !e.disabled && e.offsetParent !== null && e.type !== 'hidden');
+  if (!controls.length) { if (a === 'back') dlg.close(); return; }
+  const cur = controls.indexOf(document.activeElement), el2 = controls[cur];
+  const focusAt = i => { const t = controls[(i + controls.length) % controls.length]; t.focus({ focusVisible: true }); t.scrollIntoView({ block: 'nearest' }); UISound.play('move'); };
+  if (a === 'back') { UISound.play('back'); dlg.close(); return; }
+  if (a === 'up' || a === 'tabprev') return focusAt(cur < 0 ? 0 : cur - 1);
+  if (a === 'down' || a === 'tabnext') return focusAt(cur + 1);
+  if ((a === 'left' || a === 'right') && el2?.tagName === 'SELECT') {
+    const n = el2.options.length, i = Math.max(0, Math.min(n - 1, el2.selectedIndex + (a === 'right' ? 1 : -1)));
+    if (i !== el2.selectedIndex) { el2.selectedIndex = i; el2.dispatchEvent(new Event('change', { bubbles: true })); UISound.play('move'); }
+    return;
+  }
+  if (a === 'left') return focusAt(cur < 0 ? 0 : cur - 1);
+  if (a === 'right') return focusAt(cur + 1);
+  if (a === 'ok') {
+    if (cur < 0) return focusAt(0);
+    if (el2.tagName === 'BUTTON' || el2.type === 'checkbox') { UISound.play('select'); el2.click(); }
+    else if (el2.tagName === 'SELECT') { el2.selectedIndex = (el2.selectedIndex + 1) % el2.options.length; el2.dispatchEvent(new Event('change', { bubbles: true })); }
+    // Text boxes need a keyboard (on a Steam Controller: Steam + X shows one).
+  }
+}
 function act(a) {
   if (S.running) return;
   if (poke()) return;
   const dlg = document.querySelector('dialog[open]');
-  if (dlg) { if (a === 'back') { UISound.play('back'); dlg.close(); } return; }
+  if (dlg) { dialogAct(dlg, a); return; }
   if (S.menuOpen) {
     const bs = [...$('#menu').children];
     if (a === 'up') { UISound.play('move'); menuFocus((S.menuIdx - 1 + bs.length) % bs.length); }

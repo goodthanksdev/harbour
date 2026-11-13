@@ -446,6 +446,9 @@ async function scanFolders(folderReport, listings) {
       let pick = top[0];
       // The first copy wins unless a later one is strictly bigger (sizes capped at 9 GB).
       for (const f of top.slice(1)) if (pick.score !== Infinity && await copySize(pick) < await copySize(f)) pick = f;
+      // An update or DLC file is never a game of its own: when its base game's file is there it was
+      // grouped with it above; when it isn't (or the base file's name has no title ID), it's left out.
+      if (titleIds && !pick.added && (switchTitleId(pick.name)?.part || 0) !== 0) continue;
       best.set(key, pick);
     }
     const roots = [...extras.filter(x => x.system === 'recomp').flatMap(x => [path.join(x.path, 'media'), x.path]), config.mediaRoot && path.join(config.mediaRoot, sys.id), ...scannedDirs.flatMap(d => [path.join(d, 'media'), d]), path.join(DATA, 'media', sys.id)].filter(Boolean);
@@ -544,6 +547,10 @@ function presentLibrary(games) {
     g.scannedTitle = g.title;
     g.title = gameState(g.id).customTitle || g.scannedTitle;
   }
+  // A PC port beats a ROM of the same game on the same shelf: the ROM in a games folder (often the
+  // very file the port was built from) stays out of sight.
+  const ports = new Set(games.filter(g => g.recomp).map(g => g.system + '|' + looseKey(g.title)));
+  games = games.filter(g => g.recomp || !ports.has(g.system + '|' + looseKey(g.title)));
   const compareTitles = new Intl.Collator(undefined, { sensitivity: 'base' }).compare;
   games.sort((a, b) => compareTitles(a.title, b.title));
   libraryGames = games;
@@ -1285,6 +1292,55 @@ handle('harbour:setEmulator', ({ id, systems, args, name }) => {
   if (typeof name === 'string' && name.trim()) e.name = name.trim().slice(0, 60);
   // A console it no longer plays stops using it.
   for (const s of config.systems) if (s.emulator === id && !e.systems.includes(s.id)) s.emulator = '';
+  saveConfig(config);
+  return true;
+});
+// ---------- Game folders ----------
+// A folder of game files for a console. Choosing a parent folder ("D:\Games\roms") instead finds the
+// consoles' own folders inside it by name: "N64", "PS2", "Switch", "X360", "DS"…
+const FOLDER_NAMES = {
+  a2600: ['atari 2600', '2600', 'atari'], arcade: ['arcade', 'mame'], nes: ['nes', 'famicom'], genesis: ['genesis', 'mega drive', 'megadrive', 'md'],
+  gb: ['gb', 'game boy', 'gameboy'], snes: ['snes', 'super nintendo', 'super famicom', 'sfc'], ps1: ['ps1', 'psx', 'playstation', 'playstation 1'],
+  n64: ['n64', 'nintendo 64'], gbc: ['gbc', 'game boy color', 'gameboy color'], dreamcast: ['dreamcast', 'dc'], ps2: ['ps2', 'playstation 2'],
+  gba: ['gba', 'game boy advance', 'gameboy advance'], gc: ['gc', 'gamecube', 'ngc', 'gcn'], xbox: ['xbox', 'og xbox', 'xbox original'],
+  nds: ['ds', 'nds', 'nintendo ds'], psp: ['psp'], x360: ['x360', 'xbox 360', '360'], ps3: ['ps3', 'playstation 3'], wii: ['wii'],
+  '3ds': ['3ds', 'nintendo 3ds'], wiiu: ['wii u', 'wiiu'], ps4: ['ps4', 'playstation 4'], switch: ['switch', 'nintendo switch', 'nsw', 'ns'],
+  switch2: ['switch 2', 'switch2', 'nintendo switch 2'],
+};
+const folderKey = name => String(name).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+function consoleForFolder(name) {
+  const key = folderKey(name);
+  return Object.entries(FOLDER_NAMES).find(([, names]) => names.includes(key))?.[0] || null;
+}
+function addRomDir(sys, folder) {
+  const dirs = romDirsOf(sys);
+  if (dirs.some(d => path.resolve(d).toLowerCase() === path.resolve(folder).toLowerCase())) return false;
+  sys.romDir = [...dirs, folder].join('|');
+  return true;
+}
+// system: a console id, or '' to find consoles' folders inside the chosen one.
+handle('harbour:addGameFolder', async ({ system }) => {
+  const picked = await dialog.showOpenDialog(win, { title: system ? 'Choose the folder with your games' : 'Choose the folder that holds your consoles\' game folders', properties: ['openDirectory'] });
+  if (picked.canceled) return null;
+  const folder = picked.filePaths[0], added = [];
+  if (system) {
+    const sys = config.systems.find(s => s.id === system);
+    if (!sys) throw new Error('Unknown console.');
+    if (addRomDir(sys, folder)) added.push({ system, folder });
+  } else {
+    const own = consoleForFolder(path.basename(folder));
+    const subs = own ? [] : (await fsp.readdir(folder, { withFileTypes: true })).filter(e => e.isDirectory());
+    const found = own ? [[own, folder]] : subs.map(e => [consoleForFolder(e.name), path.join(folder, e.name)]).filter(([id]) => id);
+    if (!found.length) throw new Error('No console folders found in there (folders named like N64, PS2, Switch, X360). Add it for one console instead.');
+    for (const [id, dir] of found) { const sys = config.systems.find(s => s.id === id); if (sys && addRomDir(sys, dir)) added.push({ system: id, folder: dir }); }
+  }
+  saveConfig(config);
+  return { added };
+});
+handle('harbour:removeGameFolder', ({ system, folder }) => {
+  const sys = config.systems.find(s => s.id === system);
+  if (!sys) throw new Error('Unknown console.');
+  sys.romDir = romDirsOf(sys).filter(d => path.resolve(d).toLowerCase() !== path.resolve(folder).toLowerCase()).join('|');
   saveConfig(config);
   return true;
 });
