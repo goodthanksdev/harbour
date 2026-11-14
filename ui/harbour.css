@@ -167,8 +167,9 @@ body.frozen *, body.frozen *::before, body.frozen *::after { animation-play-stat
 #emusDlg { width: min(calc(980 * var(--u)), 92vw); max-height: 88vh; overflow-x: hidden; }
 #emusDlg h3 { margin: calc(18 * var(--u)) 0 calc(10 * var(--u)); font-size: calc(17 * var(--u)); color: var(--muted); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
 .emu-consoles { display: grid; gap: calc(8 * var(--u)); }
-.emu-console { display: grid; grid-template-columns: 1fr minmax(0, 58%) auto; align-items: center; gap: 16px; }
-.emu-console > :nth-child(2):last-child { grid-column: 2 / 4; }
+/* Same columns on every row, so the dropdowns line up whether or not a row has an Install button. */
+.emu-console { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) 11em; align-items: center; gap: 16px; }
+.emu-console > button { width: 100%; }
 .emu-console small { color: var(--dim); }
 .emu-console select { width: 100%; }
 .emu-cards { display: grid; gap: calc(10 * var(--u)); }

@@ -94,7 +94,7 @@ function emuInfo(g) {
   const sys = S.config.systems.find(s => s.id === g.system);
   if (!sys || sys.direct) return null;
   const emu = (S.emus || []).find(e => e.id === sys.emulator);
-  if (!emu) return { state: 'missing', text: 'No emulator yet (Settings → Emulators)' };
+  if (!emu) return { state: 'missing', text: 'No emulator yet: Play installs one' };
   if (!emu.exe) return { state: 'missing', text: `${emu.name} not found (Settings → Emulators)` };
   const st = S.emuStatus?.[emu.id];
   if (st?.updateAvailable) return { state: 'update', text: `${emu.name}: ${st.latest.tag} available` };
@@ -296,6 +296,8 @@ function playTime(g) {
 // ---------- actions ----------
 async function play(g = S.list[S.sel]) {
   if (!g || S.running) return;
+  // No emulator for this console yet: install the well-known one first, then start the game.
+  if (emuInfo(g)?.state === 'missing' && !(await installFor([g.system]))) return;
   UISound.play('launch');
   try { await api.launch(g.id); toast(`Starting ${g.title}…`, 2500); }
   catch (e) { UISound.play('error'); toast(e.message, 6000); }
@@ -342,7 +344,12 @@ function openMenu(anchor) {
     add('🎲 Reroll clip (another bit of the same longplay)', () => downloadVideos('game', g.id, 'reroll'));
     add('Find a different longplay', () => downloadVideos('game', g.id, 'new'));
   } else add('Get a video for this game', () => downloadVideos('game', g.id, 'missing'));
-  add('Hide from Harbour', async () => { await api.setHidden({ gameId: g.id, hidden: true }); g.hidden = true; buildTabs(); setTab(S.tab); toast(`${g.title} hidden.`); });
+  // A PC port you added can be taken out again (its files stay); a game from a games folder can be hidden.
+  if (g.recomp) add('Remove from Harbour', async () => {
+    if (!confirm(`Remove ${g.title} from Harbour? Its files stay where they are.`)) return;
+    try { await api.gameRemove(g.added); await reload(); toast(`${g.title} removed.`); } catch (e) { toast(e.message); }
+  });
+  else add('Hide from Harbour', async () => { await api.setHidden({ gameId: g.id, hidden: true }); g.hidden = true; buildTabs(); setTab(S.tab); toast(`${g.title} hidden. Settings can show it again.`, 4000); });
   const r = anchor.getBoundingClientRect();
   m.hidden = false; S.menuOpen = true;
   m.style.left = Math.min(r.left, innerWidth - m.offsetWidth - 16) + 'px';
@@ -505,7 +512,7 @@ async function renderEmulators() {
     // Updates: where they come from, the version you have, the newest one.
     const st = S.emuStatus?.[e.id] || {};
     const info = !e.exe ? { state: 'missing' } : st.updateAvailable ? { state: 'update' } : { state: 'ok' };
-    const where = st.source ? (st.source.type === 'github' ? st.source.repo : `${st.source.host}/${st.source.repo}`) : null;
+    const where = sourceText(st.source);
     const line = !where ? 'Updates: no source set, so Harbour can\'t tell when there\'s a new version.'
       : `Updates from ${where} · you have ${st.installed || '?'} · newest ${st.latest?.tag || '?'}` + (st.error ? ' (couldn\'t check)' : '');
     const upd = el('div', 'emu-update'); upd.append(emuBadge(info, 'emu-chip', st.updateAvailable ? `${st.latest.tag} available` : !e.exe ? 'Program missing' : where && st.installed ? 'Up to date' : 'Version unknown'), el('small', '', line));
@@ -527,11 +534,12 @@ async function renderEmulators() {
   $('#emuCards').replaceChildren(...(cards.length ? cards : [el('p', 'note', 'No emulators yet. Add one below.')]));
   renderGameFolders();
 }
+const sourceText = src => !src ? null : src.type === 'dolphin' ? 'dolphin-emu.org' : src.type === 'github' ? src.repo : `${src.host}/${src.repo}`;
 // Where an emulator's updates come from, and which version you have.
 function editEmuSource(e, st, card) {
   const form = el('div', 'emu-source');
   const src = el('input'); src.placeholder = 'owner/name on GitHub, or a link to the project page';
-  src.value = st.source ? (st.source.type === 'github' ? st.source.repo : `${st.source.host}/${st.source.repo}`) : '';
+  src.value = sourceText(st.source) || '';
   const tag = el('input'); tag.placeholder = 'the version you have, e.g. v0.2.1'; tag.value = st.installed || '';
   const pre = el('input'); pre.type = 'checkbox'; pre.checked = !!st.source?.prerelease;
   const preLabel = el('label', 'check'); preLabel.append(pre, 'Include test versions');
@@ -572,8 +580,9 @@ async function addGameFolder(system) {
     toast(`Added ${r.added.map(a => sysName(a.system)).join(', ')}. Finding games…`, 5000);
     S.config = await api.getConfig();
     await reload(); renderEmulators();
-    const missing = [...new Set(r.added.map(a => a.system))].filter(id => !S.config.systems.find(s => s.id === id)?.emulator);
-    if (missing.length) toast(`Pick an emulator for ${missing.map(sysName).join(', ')} above so those games can start.`, 8000);
+    // Consoles with games but no emulator get the well-known one, installed in the background.
+    const missing = [...new Set(r.added.map(a => a.system))].filter(id => S.games.some(g => g.system === id) && !S.config.systems.find(s => s.id === id)?.emulator);
+    if (missing.length) installFor(missing).then(() => renderEmulators());
     const fresh = S.games.filter(g => r.added.some(a => a.system === g.system) && !g.media?.front && !g.recomp);
     // New games get their artwork, then a gameplay clip each, without being asked.
     if (fresh.length) { S.afterArt = () => downloadVideos('library', '', 'missing'); await downloadArt('library'); }
@@ -614,6 +623,9 @@ $('#renameForm').addEventListener('submit', async e => {
 
 // ---------- settings ----------
 function openSettings() {
+  const hidden = S.games.filter(g => g.hidden).length;
+  $('#setUnhide').textContent = hidden ? `Show them again (${hidden})` : 'None hidden';
+  $('#setUnhide').disabled = !hidden;
   $('#setIdle').value = String(S.config.harbourIdle ?? 120);
   $('#setSound').value = S.config.harbourVideoSound ? '1' : '0';
   $('#setUiSound').value = S.config.harbourUiSound === false ? '0' : '1';
@@ -640,6 +652,10 @@ $('#setUiVol').onchange = e => { saveSetting({ harbourUiVolume: Number(e.target.
 $('#setVidVol').oninput = e => { S.config.harbourVideoVolume = Number(e.target.value); $('#heroVideo').volume = videoVolume() / 100; showVolumes(); };
 $('#setVidVol').onchange = e => saveSetting({ harbourVideoVolume: Number(e.target.value) });
 $('#setSound').onchange = e => { saveSetting({ harbourVideoSound: e.target.value === '1' }); $('#heroVideo').muted = e.target.value !== '1'; };
+$('#setUnhide').onclick = async () => {
+  for (const g of S.games.filter(x => x.hidden)) { await api.setHidden({ gameId: g.id, hidden: false }).catch(() => {}); g.hidden = false; }
+  $('#settings').close(); buildTabs(); setTab(S.tab, true); toast('Hidden games are back.');
+};
 $('#setCheck').onclick = () => { $('#settings').close(); checkUpdates(true); };
 $('#setArt').onclick = () => { $('#settings').close(); downloadArt('library'); };
 $('#setVideos').onclick = () => { $('#settings').close(); downloadVideos('library'); };
@@ -893,7 +909,6 @@ async function init() {
   if (!S.games.length) { UISound.play('open'); $('#welcomeDlg').showModal(); }
   // Emulator badges: draw them once the emulators' update checks are in.
   loadEmulators().then(() => { const id = S.list[S.sel]?.id; renderRow(); const i = S.list.findIndex(g => g.id === id); select(i >= 0 ? i : 0, true); });
-  if (S.games.length && !S.games.some(g => g.media?.fanart || g.media?.front)) toast('No artwork yet: open Settings (Start) → Download covers, backgrounds and logos.', 8000);
   api.onToast?.(m => toast(m, 5000));
   // Descriptions, years and developers arrive from the LaunchBox database after the library shows.
   api.onLibraryInfo?.(changed => {
@@ -939,6 +954,26 @@ async function showEmuCatalog() {
   }));
   $('#emuCatalog').querySelector('button:not([disabled])')?.focus();
 }
+// Installs the catalogue's emulator for each of these consoles that has none. True when they all have one after.
+let installingFor = null;
+async function installFor(systems) {
+  if (installingFor) { toast('An emulator is already installing.'); return false; }
+  const catalog = await api.emulatorCatalog().catch(() => []);
+  const picks = [...new Set(systems.map(id => catalog.find(c => c.consoles.includes(id))).filter(Boolean))];
+  if (!picks.length) { toast(`No emulator Harbour knows plays ${systems.map(sysName).join(', ')}. Add one with ＋ → Emulator.`, 6000); return false; }
+  installingFor = true;
+  try {
+    for (const c of picks) {
+      // Installed already but not set for this console: just use it.
+      if (c.installed) { for (const id of systems.filter(id => c.consoles.includes(id))) await api.setSystemEmulator({ system: id, emulator: c.installed }).catch(() => {}); S.config = await api.getConfig(); await loadEmulators(false); continue; }
+      if (!(await installEmulator(c))) return false;
+    }
+    const ok = systems.every(id => emuDef(id));
+    if (!ok) toast("The emulator is set up but its program wasn't found. Fix it in Settings → Emulators.", 6000);
+    return ok;
+  } finally { installingFor = null; renderRow(); select(S.sel, true); }
+}
+const emuDef = sysId => (S.emus || []).some(e => e.id === S.config.systems.find(s => s.id === sysId)?.emulator && e.exe);
 async function installEmulator(c, btn) {
   if (btn) { btn.disabled = true; btn.classList.add('busy'); btn.textContent = 'Installing…'; }
   S.updatingName = c.name;
@@ -950,9 +985,11 @@ async function installEmulator(c, btn) {
     S.config = await api.getConfig();
     await loadEmulators(false); renderRow(); select(S.sel, true);
     if (btn) { btn.classList.remove('busy'); btn.textContent = 'Installed'; }
+    return true;
   } catch (e) {
     UISound.play('error'); Activity.fail('update', `${c.name}: ${e.message}`);
     if (btn) { btn.disabled = false; btn.classList.remove('busy'); btn.textContent = 'Install'; }
+    return false;
   }
 }
 $('#emuOwn').onclick = () => { UISound.play('select'); showAddStep('addEmu'); };

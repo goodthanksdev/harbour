@@ -94,7 +94,7 @@ function createArtworkService({ dataDir, getSystems, getGames, normalize, fetchI
       const timeout = AbortSignal.timeout(REQUEST_TIMEOUT);
       const r = await fetchImpl(url, { headers: AGENT, signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
       if (r.status === 404) return null;
-      if (!r.ok) throw new Error(`Artwork server returned HTTP ${r.status}`);
+      if (!r.ok) throw new Error(`The artwork site didn't answer (error ${r.status})`);
       return r.text();
     }, signal);
   }
@@ -104,7 +104,7 @@ function createArtworkService({ dataDir, getSystems, getGames, normalize, fetchI
       const timeout = AbortSignal.timeout(REQUEST_TIMEOUT);
       const r = await fetchImpl(url, { headers: AGENT, signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
       if (r.status === 404) return null;
-      if (!r.ok) throw new Error(`Artwork server returned HTTP ${r.status}`);
+      if (!r.ok) throw new Error(`The artwork site didn't answer (error ${r.status})`);
       if (Number(r.headers.get('content-length')) > MAX_IMAGE_BYTES) throw new Error('Artwork image is too large');
       const parts = [];
       let size = 0;
@@ -124,7 +124,7 @@ function createArtworkService({ dataDir, getSystems, getGames, normalize, fetchI
   // Streams a big file (the LaunchBox database) to disk, reporting bytes as they arrive.
   async function download(url, file, onBytes = () => {}) {
     const r = await fetchImpl(url, { headers: AGENT, signal: AbortSignal.timeout(15 * 60e3) });
-    if (!r.ok || !r.body) throw new Error(`Database download failed (HTTP ${r.status})`);
+    if (!r.ok || !r.body) throw new Error(`The game database download failed (error ${r.status})`);
     const total = Number(r.headers.get('content-length')) || 0;
     if (total > MAX_DOWNLOAD_BYTES) throw new Error('Database download is unexpectedly large');
     const part = file + '.part';

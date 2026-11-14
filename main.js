@@ -638,7 +638,7 @@ const artwork = createArtworkService({
 });
 
 // ---------- Emulators ----------
-// Emulators are programs you already have, linked by their .exe. "{rom}" in the launch options is
+// Emulators Harbour installed or you added, linked by their .exe. "{rom}" in the launch options is
 // replaced with the game's file.
 function emuDef(id) {
   const e = config.customEmulators.find(x => x.id === id);
@@ -760,7 +760,11 @@ function githubToken() {
 async function ghJson(url) {
   const token = /^https:\/\/api\.github\.com\//.test(url) && githubToken();
   const r = await fetch(url, { headers: token ? { ...UA, Authorization: `Bearer ${token}` } : UA });
-  if (!r.ok) throw new Error(`GitHub ${r.status}: ${r.statusText}${r.status === 403 ? ' (rate limited — try again later)' : ''}`);
+  if (!r.ok) {
+    const e = new Error(r.status === 403 || r.status === 429 ? "GitHub's limit for update checks is used up for now. Try again in an hour."
+      : r.status === 404 ? "GitHub can't find that project." : `GitHub didn't answer (error ${r.status}). Try again later.`);
+    e.status = r.status; throw e;
+  }
   return r.json();
 }
 
@@ -771,7 +775,7 @@ async function findRelease(repo, { asset: pattern, prerelease }) {
   else {
     // Forks often only publish pre-releases, which /releases/latest skips.
     try { list = [await ghJson(`https://api.github.com/repos/${repo}/releases/latest`)]; }
-    catch (e) { if (!/GitHub 404/.test(e.message)) throw e; list = (await ghJson(`https://api.github.com/repos/${repo}/releases?per_page=15`)).filter(r => !r.draft); }
+    catch (e) { if (e.status !== 404) throw e; list = (await ghJson(`https://api.github.com/repos/${repo}/releases?per_page=15`)).filter(r => !r.draft); }
     if (!list.length) throw new Error(`${repo} has no releases to download.`);
   }
   for (const rel of list) {
@@ -784,7 +788,7 @@ async function findRelease(repo, { asset: pattern, prerelease }) {
     };
   }
   const platformName = process.platform === 'win32' ? 'Windows' : process.platform === 'darwin' ? 'macOS' : 'Linux';
-  throw new Error(re ? `No ${platformName} download matching /${pattern}/ found in recent releases of ${repo}.` : `No ${platformName} download found in recent releases of ${repo}. Set a download pattern under Source.`);
+  throw new Error(re ? `No ${platformName} download matching /${pattern}/ found in recent releases of ${repo}.` : `No ${platformName} download found in recent releases of ${repo}. Set its download file pattern in ••• → Platform & updates.`);
 }
 
 // Linux programs (AppImages, binaries) usually have no .exe extension.
@@ -921,7 +925,7 @@ async function copyUpdate(src, dest, backup, kept) {
 async function fetchRelease(rel, tmp, send) {
   const archive = path.join(tmp, rel.assetName);
   const r = await fetch(rel.url, { headers: { 'User-Agent': UA['User-Agent'] } });
-  if (!r.ok) throw new Error(`Download failed: HTTP ${r.status}`);
+  if (!r.ok) throw new Error(`The download failed (error ${r.status}). Try again later.`);
   const total = Number(r.headers.get('content-length')) || rel.size || 0;
   let got = 0, last = 0;
   await downloadTo(r, archive, chunk => {
@@ -1175,8 +1179,8 @@ function quitGame() {
 // shortcuts (.lnk, .url) and anything else are opened the way Windows would open them.
 async function launchDirect(game) {
   const file = game.recomp ? config.extraGames.find(x => x.id === game.added)?.executable : game.romPath;
-  if (!file) throw new Error('Right-click this Recomp game and choose its .exe file first.');
-  if (!fs.existsSync(file)) throw new Error(`${path.basename(file)} is missing. Rescan in Settings.`);
+  if (!file) throw new Error('Choose its program first: ••• → Choose game .exe…');
+  if (!fs.existsSync(file)) throw new Error(`${path.basename(file)} is missing. Was it moved or deleted?`);
   // Programs are started directly; batch files, shortcuts and anything else open the way the system would.
   const program = process.platform === 'win32' ? /\.exe$/i.test(file) : (/\.app$/i.test(file) || (fs.statSync(file).mode & 0o111) !== 0);
   if (!program) {
@@ -1213,7 +1217,7 @@ function discFile(game, sys, index) {
 function launchGame(gameId, options = {}) {
   // The ROM path always comes from the scanned library, never from the renderer.
   const game = libraryGames.find(g => g.id === gameId);
-  if (!game) throw new Error('This game is no longer in your library. Rescan in Settings and try again.');
+  if (!game) throw new Error('This game is no longer in your library. Was it moved or deleted?');
   const sys = config.systems.find(s => s.id === game.system);
   if (!sys) throw new Error('Unknown system');
   let disc = 0;
@@ -1237,7 +1241,7 @@ function launchGame(gameId, options = {}) {
     padDefaults(exe);
     const child = spawn(exe, args, { cwd: path.dirname(exe), env: launchEnv(), detached: true, stdio: 'ignore' });
     child.once('error', e => reject(new Error(`Launch failed: ${e.message}`)));
-    child.once('spawn', () => { track(game, child); resolve(true); });
+    child.once('spawn', () => { track(game, child); child.unref(); resolve(true); });
   });
 }
 
@@ -1350,7 +1354,7 @@ function setGameHidden(gameId, hidden) {
 handle('game:setHidden', ({ gameId, hidden }) => setGameHidden(gameId, !!hidden));
 handle('game:openFolder', async gameId => {
   const game = libraryGames.find(g => g.id === gameId);
-  if (!game?.romPath || !fs.existsSync(game.romPath)) throw new Error('The game file is missing. Rescan your library and try again.');
+  if (!game?.romPath || !fs.existsSync(game.romPath)) throw new Error('The game file is missing. Was it moved or deleted?');
   const folder = fs.statSync(game.romPath).isDirectory() ? game.romPath : path.dirname(game.romPath);
   const error = await shell.openPath(folder);
   if (error) throw new Error(error);
@@ -1678,7 +1682,7 @@ handle('harbour:installEmulator', async catalogId => {
     const id = 'custom-' + c.id;
     config.customEmulators = config.customEmulators.filter(e => e.id !== id);
     config.customEmulators.push({ id, name: c.name, exe, args: c.args, systems: [...c.consoles],
-      source: { type: c.source.type, repo: c.source.repo, ...(c.source.host ? { host: c.source.host } : {}), ...(c.source.asset ? { asset: c.source.asset } : {}), prerelease: false },
+      source: { ...c.source, prerelease: false },
       installed: { tag: rel.tag, stamp: fileStamp(exe)?.id } });
     // Consoles without a working emulator start using it.
     for (const s of config.systems) if (c.consoles.includes(s.id) && !emuDef(s.emulator)) s.emulator = id;
@@ -1754,20 +1758,32 @@ handle('harbour:removeGameFolder', ({ system, folder }) => {
   return true;
 });
 // ---------- Emulator updates ----------
-// An emulator can have an update source: a GitHub repository ("owner/name") or one on another
-// Forgejo/Gitea site ("git.eden-emu.dev/eden-emu/eden"). Harbour only tells you about new versions;
-// emulators update with their own updater or by hand, and Harbour notices (see noticeUpdate).
+// An emulator can have an update source: a GitHub repository ("owner/name"), one on another Forgejo/Gitea site
+// ("git.eden-emu.dev/eden-emu/eden") or Dolphin's own site. Harbour installs its updates (see harbour:emuUpdate), and
+// notices when you update it some other way (see noticeUpdate).
 function parseSource(input) {
   const text = String(input || '').trim().replace(/^https?:\/\//i, '').replace(/\.git$/i, '').replace(/\/+$/, '');
   if (!text) return null;
+  if (/^(www.)?dolphin-emu.org(?:[/]|$)/i.test(text)) return { type: 'dolphin', repo: 'dolphin-emu/dolphin' };
   const m = text.match(/^(?:(?:www\.)?github\.com\/)?([\w.-]+\/[\w.-]+)$/i);
   if (m) return { type: 'github', repo: parseRepo(m[1]) };
   const f = text.match(/^([a-z0-9.-]+\.[a-z]{2,})\/([\w.-]+\/[\w.-]+)(?:\/.*)?$/i);
   if (f) return { type: 'forgejo', host: f[1].toLowerCase(), repo: f[2] };
   throw new Error('Enter a GitHub repository (owner/name) or a link to the project page.');
 }
+// Dolphin publishes its builds on its own site, not GitHub: its built-in updater reads this feed of the newest release.
+async function dolphinRelease() {
+  const r = await fetch('https://dolphin-emu.org/update/latest/beta/', { headers: { 'User-Agent': UA['User-Agent'] } });
+  if (!r.ok) throw new Error(`dolphin-emu.org didn't answer (error ${r.status}). Try again later.`);
+  const j = await r.json();
+  const a = (j.artifacts || []).find(x => /^windows x64/i.test(x.system));
+  if (!a) throw new Error('No Windows download in the newest Dolphin release.');
+  return { tag: j.shortrev, date: (j.date || '').slice(0, 10), publishedAt: j.date || null, published: j.date || null,
+    assetId: j.hash, assetName: path.basename(new URL(a.url).pathname), size: 0, url: a.url, digest: null, page: 'https://dolphin-emu.org/download/' };
+}
 async function latestEmulatorRelease(source, prerelease) {
   let list, page;
+  if (source.type === 'dolphin') return dolphinRelease();
   if (source.type === 'github') {
     page = `https://github.com/${source.repo}/releases`;
     // Stable track: ask GitHub for the latest stable release directly. Busy projects (PCSX2) publish
@@ -1776,12 +1792,12 @@ async function latestEmulatorRelease(source, prerelease) {
       try {
         const rel = await ghJson(`https://api.github.com/repos/${source.repo}/releases/latest`);
         return { tag: rel.tag_name, date: (rel.published_at || '').slice(0, 10), published: rel.published_at || null, page: rel.html_url || page };
-      } catch (e) { if (!/GitHub 404/.test(e.message)) throw e; } // only test builds published: fall through
+      } catch (e) { if (e.status !== 404) throw e; } // only test builds published: fall through
     }
     list = await ghJson(`https://api.github.com/repos/${source.repo}/releases?per_page=10`);
   } else {
     const r = await fetch(`https://${source.host}/api/v1/repos/${source.repo}/releases?limit=10`, { headers: { 'User-Agent': UA['User-Agent'] } });
-    if (!r.ok) throw new Error(`${source.host} ${r.status}`);
+    if (!r.ok) throw new Error(`${source.host} didn't answer (error ${r.status}). Try again later.`);
     list = await r.json();
     page = `https://${source.host}/${source.repo}/releases`;
   }
@@ -1826,10 +1842,11 @@ handle('harbour:checkEmulators', async force => {
 // ---- Installing emulator updates ----
 // The release with its Windows download. installer: true picks the setup .exe instead of the portable archive.
 async function emulatorDownload(source, { installer = false } = {}) {
+  if (source.type === 'dolphin') { if (installer) throw new Error('Dolphin has no installer here.'); return dolphinRelease(); }
   const pattern = installer ? '(setup|install).*\\.exe$' : source.asset;
   if (source.type === 'github') return findRelease(source.repo, { asset: pattern, prerelease: source.prerelease });
   const r = await fetch(`https://${source.host}/api/v1/repos/${source.repo}/releases?limit=10`, { headers: { 'User-Agent': UA['User-Agent'] } });
-  if (!r.ok) throw new Error(`${source.host} ${r.status}`);
+  if (!r.ok) throw new Error(`${source.host} didn't answer (error ${r.status}). Try again later.`);
   const re = pattern ? new RegExp(pattern, 'i') : null;
   for (const rel of (await r.json()).filter(x => !x.draft && (source.prerelease || !x.prerelease))) {
     const a = re ? rel.assets.find(x => re.test(x.name)) : guessAsset(rel.assets);
@@ -1949,7 +1966,7 @@ handle('harbour:selfUpdate', async () => {
 
 handle('harbour:openEmulatorPage', async id => {
   const e = config.customEmulators.find(x => x.id === id);
-  const page = recompChecks.get('emu:' + id)?.latest?.page || (e?.source && (e.source.type === 'github' ? `https://github.com/${e.source.repo}/releases` : `https://${e.source.host}/${e.source.repo}/releases`));
+  const page = recompChecks.get('emu:' + id)?.latest?.page || (e?.source && (e.source.type === 'dolphin' ? 'https://dolphin-emu.org/download/' : e.source.type === 'github' ? `https://github.com/${e.source.repo}/releases` : `https://${e.source.host}/${e.source.repo}/releases`));
   if (!page || !/^https:\/\//.test(page)) throw new Error('No update source set for this emulator.');
   await shell.openExternal(page);
   return true;

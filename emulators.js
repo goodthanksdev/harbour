@@ -25,6 +25,8 @@ const CATALOG = [
     exe: 'mGBA.exe', args: '-f {rom}' },
   { id: 'cemu', name: 'Cemu', consoles: ['wiiu'], source: { type: 'github', repo: 'cemu-project/Cemu' },
     exe: 'Cemu.exe', args: '-f -g {rom}', note: 'Needs your Wii U keys, added once in its settings.' },
+  { id: 'dolphin', name: 'Dolphin', consoles: ['gc', 'wii'], source: { type: 'dolphin', repo: 'dolphin-emu/dolphin' },
+    exe: 'Dolphin.exe', args: '-b -C Dolphin.Display.Fullscreen=True -e {rom}' },
   { id: 'eden', name: 'Eden', consoles: ['switch'], source: { type: 'forgejo', host: 'git.eden-emu.dev', repo: 'eden-emu/eden' },
     exe: 'eden.exe', args: '-g {rom}', note: 'Needs your Switch keys and firmware, added once in its settings.' },
   { id: 'lichii', name: 'Lichii', consoles: ['switch2'], source: { type: 'github', repo: 'zortos293/Lichii' },

@@ -37,6 +37,9 @@ SOFTWARE.
 - [yt-dlp](https://github.com/yt-dlp/yt-dlp) (Unlicense) and [FFmpeg](https://ffmpeg.org/) (GPL build from
   [yt-dlp/FFmpeg-Builds](https://github.com/yt-dlp/FFmpeg-Builds)), downloaded into `data/tools` the first time game
   clips are made.
+- Emulators you install from Harbour (RMG, PCSX2, Dolphin, melonDS and the rest in `emulators.js`) are downloaded
+  from each project's own official releases into the `Emulators` folder, under their own licences. Harbour includes
+  none of them.
 
 ## Data sources
 

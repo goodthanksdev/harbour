@@ -5,6 +5,8 @@
 Every game, one harbour. A lightweight, controller-friendly launcher for **PC recomps and ports and emulators**,
 side by side on their real console's shelf, kept up to date for you.
 
+![The shelf](docs/shelf.png)
+
 ## What it does
 
 - **One big picture.** The selected game's background art fades into a 45-second HD gameplay clip. Console tabs
@@ -18,8 +20,12 @@ side by side on their real console's shelf, kept up to date for you.
   Programs in protected folders (like Program Files) are updated with their own installer after one admin prompt.
   Update something yourself and Harbour notices.
 - **Emulators in a click.** Harbour knows the well-known emulator for each console (RMG, DuckStation, PCSX2, RPCS3,
-  PPSSPP, xemu, Xenia Canary, melonDS, Azahar, mGBA, Cemu, Eden, Lichii, Flycast, Snes9x, Mesen): it installs one from
-  its official releases, sets it up for its consoles, and offers it when a console's games have none.
+  PPSSPP, xemu, Xenia Canary, Dolphin, melonDS, Azahar, mGBA, Cemu, Eden, Lichii, Flycast, Snes9x, Mesen). Add a
+  games folder, or press Play on a game with no emulator, and Harbour installs the right one from its official
+  releases and sets it up. Emulators with no controller buttons set get a standard pad layout, and a Steam
+  Controller works through Steam.
+
+  ![Installing emulators](docs/emulators.png)
 - **Game folders.** Point Harbour at your games folder and it finds the console subfolders (N64, PS2, Switch…) by
   their names. New games show up by themselves.
 - **Artwork and clips without accounts.** Covers, logos, backgrounds and screenshots come from the LaunchBox games
@@ -45,8 +51,8 @@ Steam, add `Harbour.exe` as a non-Steam game (`Harbour.ico` is next to it).
 
 Then, in Harbour:
 
-1. **Settings → Emulators & game folders → Manage**: add your games folder; install an emulator for each console
-   with one click (or add ones you already have).
+1. **Pick your games folder** (Harbour asks the first time; later: Settings → Emulators & game folders → Manage).
+   Emulators for those consoles install by themselves; add ones you already have with ＋ → Emulator.
 2. **＋ → PC port / recomp**: pick its folder. Harbour finds the program, its GitHub project and which version you
    have, and the game's name and console; check them and press Add.
 3. Artwork and clips arrive by themselves. Settings also has buttons to fetch them for everything.
@@ -59,7 +65,7 @@ Everything Harbour keeps (settings, artwork, clips, logs) lives in `data\` next 
 |---|---|---|
 | A | Enter or Space | Play |
 | B | Esc | Back / close |
-| X | X | More (favourite, rename, artwork, clip, hide…) |
+| X | X | More (favourite, rename, artwork, clip, hide or remove…) |
 | Y | U | Update this game |
 | LB / RB | Q / E or ↑ / ↓ | Previous / next console |
 | LT / RT | Page Up / Page Down | Jump along the shelf |
@@ -71,7 +77,7 @@ Everything Harbour keeps (settings, artwork, clips, logs) lives in `data\` next 
 ## Making it yours
 
 - **UI sounds:** drop `move`, `tab`, `select`, `open`, `back`, `launch` or `error` (.wav, .ogg or .mp3) into
-  `ui\sounds\` and it replaces that built-in sound.
+  `ui\sounds\` (in a release: `resources\app\ui\sounds\`) and it replaces that built-in sound.
 - **Logo and icons** are drawn by `scripts/build-harbour-brand.cjs`; `npm run brand:build` rebuilds them.
 
 ## Credits
