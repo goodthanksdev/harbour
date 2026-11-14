@@ -15,7 +15,7 @@ const out = path.join(dist, name);
 const zip = path.join(dist, `${name}.zip`);
 
 // Harbour's own files: everything the app loads, plus its licence and notices. Not data\, node_modules or dev files.
-const APP_FILES = ['main.js', 'preload.js', 'artwork.js', 'launchbox.js', 'videos.js', 'package.json', 'ui',
+const APP_FILES = ['main.js', 'preload.js', 'artwork.js', 'launchbox.js', 'videos.js', 'emulators.js', 'package.json', 'ui',
   'LICENSE', 'THIRD_PARTY_NOTICES.md', 'README.md'];
 
 if (!fs.existsSync(path.join(electronDir, 'electron.exe'))) throw new Error('Run npm install first (no Electron in node_modules).');

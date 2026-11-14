@@ -16,3 +16,6 @@ Desktop.ini
 
 # Release builds (npm run release:build)
 dist/
+
+# Emulators Harbour installed (when run from source)
+Emulators/

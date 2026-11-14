@@ -386,7 +386,7 @@ async function emulatorsFor(sysId) {
   return [...list.filter(e => fits(e) && (e.exe || e.custom)), ...list.filter(e => !fits(e) && e.exe)];
 }
 function showAddStep(step) {
-  for (const id of ['addPick', 'addPort', 'addEmu']) $('#' + id).hidden = id !== step;
+  for (const id of ['addPick', 'addPort', 'addEmuPick', 'addEmu']) $('#' + id).hidden = id !== step;
   $('#' + step).querySelector('select, input, button')?.focus();
 }
 async function openAdd() {
@@ -417,7 +417,7 @@ async function pickPort() {
   $('#addDlg').showModal();
 }
 $('#btnAdd').onclick = openAdd;
-for (const b of document.querySelectorAll('#addDlg .choice')) b.onclick = () => { UISound.play('select'); if (b.dataset.kind === 'port') pickPort(); else showAddStep('addEmu'); };
+for (const b of document.querySelectorAll('#addDlg .choice')) b.onclick = () => { UISound.play('select'); if (b.dataset.kind === 'port') pickPort(); else showEmuCatalog(); };
 for (const b of document.querySelectorAll('#addDlg .addBack')) b.onclick = () => { UISound.play('back'); showAddStep('addPick'); };
 for (const b of document.querySelectorAll('#addDlg .addCancel')) b.onclick = () => { UISound.play('back'); $('#addDlg').close(); };
 // After adding: show it, then fetch its artwork and a gameplay clip without being asked.
@@ -470,6 +470,7 @@ async function renderEmulators() {
   // Consoles worth listing: ones with games, or ones an emulator is set up for.
   const counts = {}; for (const g of S.games) counts[g.system] = (counts[g.system] || 0) + 1;
   const listed = consoles().filter(s => counts[s.id] || mine.some(e => (e.systems || []).includes(s.id)));
+  const catalog = await api.emulatorCatalog().catch(() => []);
   const rows = listed.map(s => {
     const row = el('div', 'emu-console');
     const label = el('span', '', s.name); if (counts[s.id]) label.append(el('small', '', ` · ${counts[s.id]} game${counts[s.id] === 1 ? '' : 's'}`));
@@ -482,7 +483,16 @@ async function renderEmulators() {
       try { await api.setSystemEmulator({ system: s.id, emulator: pick.value }); UISound.play('select'); toast(`${shortName(s.name)} games now start with ${pick.selectedOptions[0].textContent}.`); }
       catch (e) { UISound.play('error'); toast(e.message); }
     };
-    row.append(label, pick); return row;
+    row.append(label, pick);
+    // Games that need an emulator but none is set: offer the well-known one for this console.
+    const needOne = S.games.some(g => g.system === s.id && !g.recomp);
+    const offer = needOne && !pick.value && catalog.find(c => c.consoles.includes(s.id) && !c.installed);
+    if (offer) {
+      const b = el('button', 'primary', `Install ${offer.name}`); b.type = 'button';
+      b.onclick = async () => { await installEmulator(offer, b); renderEmulators(); };
+      row.append(b);
+    }
+    return row;
   });
   $('#emuConsoles').replaceChildren(...(rows.length ? rows : [el('p', 'note', 'No consoles yet.')]));
   const cards = mine.map(e => {
@@ -588,7 +598,7 @@ $('#setEmus').onclick = () => { $('#settings').close(); openEmulators(); };
 $('#emusClose').onclick = () => { UISound.play('back'); $('#emusDlg').close(); };
 // Changes made in there (emulators, versions) show on the covers' badges as soon as it closes.
 $('#emusDlg').addEventListener('close', () => { const id = S.list[S.sel]?.id; renderRow(); const i = S.list.findIndex(g => g.id === id); select(i >= 0 ? i : 0, true); });
-$('#emusAdd').onclick = async () => { $('#emusDlg').close(); await openAdd(); showAddStep('addEmu'); };
+$('#emusAdd').onclick = async () => { $('#emusDlg').close(); await openAdd(); showEmuCatalog(); };
 
 // ---------- rename ----------
 let renaming = null;
@@ -906,3 +916,42 @@ init().catch(e => toast('Harbour failed to start: ' + e.message, 10000));
 $('#welcomeFolder').onclick = async () => { UISound.play('select'); $('#welcomeDlg').close(); await addGameFolder(''); };
 $('#welcomePort').onclick = async () => { UISound.play('select'); $('#welcomeDlg').close(); await pickPort(); };
 $('#welcomeLater').onclick = () => { UISound.play('back'); $('#welcomeDlg').close(); };
+
+// ---------- installing well-known emulators ----------
+// The catalogue step of ＋ → Emulator: each one with an Install button (or "Set up" once it's there).
+async function showEmuCatalog() {
+  showAddStep('addEmuPick');
+  const list = await api.emulatorCatalog().catch(() => []);
+  const counts = {};
+  for (const g of S.games) counts[g.system] = (counts[g.system] || 0) + 1;
+  // Emulators for consoles you have games for come first.
+  list.sort((a, b) => Number(b.consoles.some(c => counts[c])) - Number(a.consoles.some(c => counts[c])));
+  $('#emuCatalog').replaceChildren(...list.map(c => {
+    const card = el('div', 'emu-cat');
+    const info = el('div', 'emu-cat-info');
+    info.append(el('b', '', c.name), el('small', '', c.consoles.map(sysName).join(', ') + (c.note ? ` · ${c.note}` : '')));
+    const btn = el('button', c.installed ? '' : 'primary', c.installed ? 'Installed' : 'Install');
+    btn.type = 'button'; btn.disabled = !!c.installed;
+    btn.onclick = () => installEmulator(c, btn);
+    card.append(info, btn);
+    return card;
+  }));
+  $('#emuCatalog').querySelector('button:not([disabled])')?.focus();
+}
+async function installEmulator(c, btn) {
+  if (btn) { btn.disabled = true; btn.classList.add('busy'); btn.textContent = 'Installing…'; }
+  S.updatingName = c.name;
+  Activity.set('update', `Installing ${c.name}…`);
+  try {
+    const r = await api.installEmulator(c.id);
+    UISound.play('select');
+    Activity.done('update', `${c.name} installed${r.note ? `: ${r.note}` : ''}`);
+    S.config = await api.getConfig();
+    await loadEmulators(false); renderRow(); select(S.sel, true);
+    if (btn) { btn.classList.remove('busy'); btn.textContent = 'Installed'; }
+  } catch (e) {
+    UISound.play('error'); Activity.fail('update', `${c.name}: ${e.message}`);
+    if (btn) { btn.disabled = false; btn.classList.remove('busy'); btn.textContent = 'Install'; }
+  }
+}
+$('#emuOwn').onclick = () => { UISound.play('select'); showAddStep('addEmu'); };

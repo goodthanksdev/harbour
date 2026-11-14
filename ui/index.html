@@ -104,7 +104,7 @@
       <h2>Add to Harbour</h2>
       <div class="choices">
         <button type="button" class="choice" data-kind="port"><b>PC port / recomp</b><span>Pick its folder. Harbour works out the rest.</span></button>
-        <button type="button" class="choice" data-kind="emu"><b>Emulator</b><span>An emulator you already have, like Eden or PCSX2.</span></button>
+        <button type="button" class="choice" data-kind="emu"><b>Emulator</b><span>Install a well-known one in a click, or add one you have.</span></button>
       </div>
       <p class="note">Games for emulators come from your game folders (Settings → Emulators &amp; game folders).</p>
       <div class="dlg-actions"><button type="button" class="addCancel">Cancel</button></div>
@@ -118,8 +118,14 @@
       <label>GitHub page for updates<input name="repo" placeholder="not found: paste its link to get updates" autocomplete="off" spellcheck="false" /></label>
       <div class="dlg-actions"><button type="button" class="addBack">Back</button><button class="primary">Add</button></div>
     </form>
-    <form id="addEmu" hidden>
+    <!-- Well-known emulators Harbour installs and keeps updated -->
+    <div id="addEmuPick" hidden>
       <h2>Add an emulator</h2>
+      <div id="emuCatalog" class="emu-catalog"></div>
+      <div class="dlg-actions"><button type="button" class="addBack">Back</button><button type="button" id="emuOwn">One I already have…</button></div>
+    </div>
+    <form id="addEmu" hidden>
+      <h2>Add an emulator you have</h2>
       <label>Name <small>(optional)</small><input name="name" placeholder="e.g. PCSX2" autocomplete="off" spellcheck="false" /></label>
       <label>Consoles it plays</label>
       <div id="emuSystems" class="sys-grid"></div>

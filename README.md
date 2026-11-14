@@ -17,6 +17,9 @@ side by side on their real console's shelf, kept up to date for you.
   Windows Defender, backs up the files it replaces and keeps your settings. "Update all" does everything at once.
   Programs in protected folders (like Program Files) are updated with their own installer after one admin prompt.
   Update something yourself and Harbour notices.
+- **Emulators in a click.** Harbour knows the well-known emulator for each console (RMG, DuckStation, PCSX2, RPCS3,
+  PPSSPP, xemu, Xenia Canary, melonDS, Azahar, mGBA, Cemu, Eden, Lichii, Flycast, Snes9x, Mesen): it installs one from
+  its official releases, sets it up for its consoles, and offers it when a console's games have none.
 - **Game folders.** Point Harbour at your games folder and it finds the console subfolders (N64, PS2, Switch…) by
   their names. New games show up by themselves.
 - **Artwork and clips without accounts.** Covers, logos, backgrounds and screenshots come from the LaunchBox games
@@ -42,7 +45,8 @@ Steam, add `Harbour.exe` as a non-Steam game (`Harbour.ico` is next to it).
 
 Then, in Harbour:
 
-1. **Settings → Emulators & game folders → Manage**: add your games folder, and the emulators you already have.
+1. **Settings → Emulators & game folders → Manage**: add your games folder; install an emulator for each console
+   with one click (or add ones you already have).
 2. **＋ → PC port / recomp**: pick its folder. Harbour finds the program, its GitHub project and which version you
    have, and the game's name and console; check them and press Add.
 3. Artwork and clips arrive by themselves. Settings also has buttons to fetch them for everything.

@@ -18,6 +18,7 @@ const { pathToFileURL } = require('url');
 const { createArtworkService } = require('./artwork');
 const { createLaunchBox } = require('./launchbox');
 const { createVideoService } = require('./videos');
+const { CATALOG } = require('./emulators');
 
 const ROOT = __dirname;
 const PACKAGE = require('./package.json');
@@ -114,6 +115,9 @@ function loadConfig() {
       done.add(key);
     }
     saved.migrations = [...done];
+    // A console set to an emulator that isn't set up (older settings named built-in ones) has none.
+    const known = new Set((saved.customEmulators || []).map(e => e.id));
+    for (const s of saved.systems || []) if (s.emulator && !known.has(s.emulator)) s.emulator = '';
     return { ...def, ...saved };
   } catch (e) {
     // Keep the damaged file instead of letting the next save overwrite it with defaults.
@@ -1600,6 +1604,62 @@ handle('harbour:addEmulator', async ({ name, systems, args, makeDefault }) => {
   saveConfig(config);
   return { id, name: label };
 });
+// ---- Installing a well-known emulator (emulators.js) ----
+// Into an Emulators folder beside Harbour's data, ready for its consoles, with updates from where it's released.
+const EMULATORS_DIR = path.join(path.dirname(DATA), 'Emulators');
+const sameSource = (a, b) => !!a && !!b && a.repo?.toLowerCase() === b.repo?.toLowerCase() && (a.host || '') === (b.host || '');
+handle('harbour:emulatorCatalog', () => CATALOG
+  .map(c => ({ ...c, consoles: c.consoles.filter(id => config.systems.some(s => s.id === id)),
+    installed: config.customEmulators.find(e => sameSource(e.source, c.source))?.id || null }))
+  .filter(c => c.consoles.length));
+const installing = new Set();
+handle('harbour:installEmulator', async catalogId => {
+  const c = CATALOG.find(x => x.id === catalogId);
+  if (!c) throw new Error('Unknown emulator.');
+  if (config.customEmulators.some(e => sameSource(e.source, c.source))) throw new Error(`${c.name} is already set up.`);
+  if (installing.has(c.id)) throw new Error('Already installing.');
+  installing.add(c.id);
+  const send = p => win?.webContents.send('recomp:progress', { gameId: 'install:' + c.id, ...p });
+  const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'harbour-install-'));
+  try {
+    send({ stage: 'Finding the latest release…', pct: 0 });
+    const source = { ...c.source, prerelease: false };
+    const rel = await emulatorDownload(source);
+    const { archive, scan } = await fetchRelease(rel, tmp, send);
+    const src = await unpackRelease(rel, archive, tmp, send);
+    send({ stage: 'Installing…', pct: 1 });
+    const folder = path.join(EMULATORS_DIR, c.name);
+    await fsp.mkdir(folder, { recursive: true });
+    await fsp.cp(src, folder, { recursive: true, force: false, errorOnExist: false });
+    // The program: the one the catalogue names, wherever it sits in the release, else the best guess.
+    let exe = null;
+    const look = (dir, depth) => {
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) { if (depth < 3 && !exe) look(p, depth + 1); }
+        else if (e.name.toLowerCase() === c.exe.toLowerCase()) exe ||= p;
+      }
+    };
+    look(folder, 0);
+    exe ||= guessProgram(folder, c.source.repo);
+    if (!exe) throw new Error(`${c.name} was downloaded, but its program wasn't found in it.`);
+    const id = 'custom-' + c.id;
+    config.customEmulators = config.customEmulators.filter(e => e.id !== id);
+    config.customEmulators.push({ id, name: c.name, exe, args: c.args, systems: [...c.consoles],
+      source: { type: c.source.type, repo: c.source.repo, ...(c.source.host ? { host: c.source.host } : {}), ...(c.source.asset ? { asset: c.source.asset } : {}), prerelease: false },
+      installed: { tag: rel.tag, stamp: fileStamp(exe)?.id } });
+    // Consoles without a working emulator start using it.
+    for (const s of config.systems) if (c.consoles.includes(s.id) && !emuDef(s.emulator)) s.emulator = id;
+    saveConfig(config);
+    log(`installed ${c.name} ${rel.tag} (${rel.assetName}, defender: ${scan}) to ${folder}`);
+    send({ stage: 'Done', pct: 1, done: true });
+    return { id, name: c.name, note: c.note || '' };
+  } finally {
+    installing.delete(c.id);
+    fsp.rm(tmp, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
 // Change the consoles an emulator you added plays (and its launch options).
 handle('harbour:setEmulator', ({ id, systems, args, name }) => {
   const e = config.customEmulators.find(x => x.id === id);

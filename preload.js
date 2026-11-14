@@ -46,6 +46,8 @@ contextBridge.exposeInMainWorld('api', {
   checkEmulators: force => call('harbour:checkEmulators', force),
   openEmulatorPage: id => call('harbour:openEmulatorPage', id),
   emuUpdate: id => call('harbour:emuUpdate', id),
+  emulatorCatalog: () => call('harbour:emulatorCatalog'),
+  installEmulator: id => call('harbour:installEmulator', id),
   selfStatus: force => call('harbour:selfStatus', force),
   selfUpdate: () => call('harbour:selfUpdate'),
   // recomp updates
