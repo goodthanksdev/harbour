@@ -780,7 +780,21 @@ function setFrozen() {
   else { S.lastInput = Date.now(); startVideoSoon(S.list[S.sel]); }
   setPolling();
 }
-addEventListener('focus', () => { S.focused = true; setFrozen(); noticeOwnUpdates(); });
+addEventListener('focus', () => { S.focused = true; setFrozen(); noticeOwnUpdates(); rescanOnReturn(); });
+// Coming back to Harbour: games added to the folders meanwhile show up (and get their artwork), at most every 20 s.
+let lastRescan = Date.now();
+async function rescanOnReturn() {
+  if (S.running || Date.now() - lastRescan < 20000) return;
+  lastRescan = Date.now();
+  const fresh = await api.scan(false, { onlyIfChanged: true }).catch(() => null);
+  if (fresh) {
+    const id = S.list[S.sel]?.id, before = S.games.length;
+    S.games = fresh; buildTabs(); setTab(S.tab, true);
+    const i = S.list.findIndex(g => g.id === id); if (i >= 0) select(i, true);
+    if (fresh.length > before) toast(`${fresh.length - before} new game${fresh.length - before === 1 ? '' : 's'} found.`);
+  }
+  autoMedia();
+}
 // Coming back to Harbour (e.g. after updating an emulator yourself): look again, without asking the internet.
 async function noticeOwnUpdates() {
   if (!pendingUpdates().length) return;
