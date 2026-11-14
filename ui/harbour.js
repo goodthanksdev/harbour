@@ -156,7 +156,7 @@ function renderUpdates() {
     if (u.auto) b('Update', () => updateOne(u), 'primary');
     else {
       // Harbour can't install this one: say where to update it. It notices by itself once it's done.
-      name.append(el('small', 'upd-how', u.kind === 'emu' ? `Update it in ${u.name} or from its release page` : 'Update it with its own updater or from its release page'));
+      name.append(el('small', 'upd-how', 'Update in app'));
       b('Release page', () => (u.kind === 'emu' ? api.openEmulatorPage(u.id) : api.recompOpenPage(u.id)).catch(e => toast(e.message)));
     }
     row.append(name, btns); return row;
@@ -272,7 +272,7 @@ function showGame(g) {
   $('#gDesc').textContent = g.info?.description || '';
   const up = $('#btnUpdate');
   up.hidden = !st?.updateAvailable; up.className = 'new';
-  up.textContent = st?.updateAvailable ? (st.auto ? `⬆ Update to ${st.latest.tag}` : `⬆ ${st.latest.tag}: release page`) : '';
+  up.textContent = st?.updateAvailable ? (st.auto ? `⬆ Update to ${st.latest.tag}` : `${st.latest.tag}: update in app`) : '';
 }
 function playTime(g) {
   if (!g.playMs) return '';
@@ -291,7 +291,7 @@ let updating = false;
 async function update(g = S.list[S.sel]) {
   const st = g && S.recomp[g.id];
   if (!st?.updateAvailable) return;
-  if (!st.auto) { api.recompOpenPage(g.id).then(() => toast('Release page opened. Harbour notices once you\'ve updated.', 6000)).catch(e => toast(e.message)); return; }
+  if (!st.auto) { api.recompOpenPage(g.id).then(() => toast('Update in app.', 4000)).catch(e => toast(e.message)); return; }
   if (updating) return toast('An update is already running.');
   updating = true;
   S.updatingName = g.title; Activity.set('update', `Updating ${g.title}…`);

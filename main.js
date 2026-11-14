@@ -946,7 +946,7 @@ const harbourInstalls = source => !!source && source.auto !== false && !source.o
 class NotReadyToRun extends Error {}
 function updatesWithOwnTool(source, name) {
   if (source && !source.ownTool) { source.ownTool = true; saveConfig(config); log(`${name}: downloads aren't ready-to-run builds, updates with its own tool`); }
-  return new NotReadyToRun(`${name} updates with its own tool (its download isn't the program itself). Open its release page to update it.`);
+  return new NotReadyToRun(`${name}: update in app.`);
 }
 // The files inside a remote zip, read from its end with a few small range requests instead of downloading it all.
 // null when the server can't do that (the full download then decides).
@@ -1030,7 +1030,7 @@ const updatingRecomps = new Set();
 async function updateRecomp(gameId, sendRaw) {
   const { game, entry } = recompEntry(gameId);
   if (!entry.source?.repo) throw new Error('Set an update source for this game first.');
-  if (!harbourInstalls(entry.source)) throw new NotReadyToRun(`${game.title} updates with its own tool. Open its release page to update it.`);
+  if (!harbourInstalls(entry.source)) throw new NotReadyToRun(`${game.title}: update in app.`);
   if (updatingRecomps.has(gameId)) throw new Error('Already updating');
   if (running.has(gameId) || isRunning(entry.executable)) throw new Error('Close the game before updating it.');
   const send = p => sendRaw({ gameId, ...p });
@@ -1579,7 +1579,7 @@ handle('harbour:emuUpdate', async id => {
   const exe = e && resolveExe(id);
   if (!e?.source) throw new Error('Set where this emulator\'s updates come from first (Updates…).');
   if (!exe) throw new Error(`Can't find ${e.name}'s program. Choose it again first.`);
-  if (!harbourInstalls(e.source)) throw new NotReadyToRun(`${e.name} updates with its own tool. Open its release page to update it.`);
+  if (!harbourInstalls(e.source)) throw new NotReadyToRun(`${e.name}: update in app.`);
   if (updatingEmus.has(id)) throw new Error('Already updating.');
   if (running.size || isRunning(exe)) throw new Error(`Close ${e.name} (and any game) before updating it.`);
   const send = p => win?.webContents.send('recomp:progress', { gameId: 'emu:' + id, ...p });
