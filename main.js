@@ -785,7 +785,7 @@ const PROGRAM_FILTERS = process.platform === 'win32' ? [{ name: 'Programs', exte
   : process.platform === 'darwin' ? [{ name: 'Applications', extensions: ['app'] }, { name: 'All files', extensions: ['*'] }]
   : [{ name: 'All files', extensions: ['*'] }];
 const PROGRAM_START = process.platform === 'darwin' ? { defaultPath: '/Applications' } : {};
-const ARCHIVE = /\.(zip|7z|tar|tgz|tar\.(gz|xz|zst|bz2))$/i;
+const ARCHIVE = /\.(zip|7z|rar|tar|tgz|tar\.(gz|xz|zst|bz2))$/i;  // bsdtar (built into Windows) reads all of these
 function run(cmd, args) {
   return new Promise((res, rej) => {
     const p = spawn(cmd, args, { windowsHide: true });
