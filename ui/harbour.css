@@ -43,8 +43,10 @@ body.ambient #hero { bottom: 0; }
 .brand img { height: calc(38 * var(--u)); }
 /* Wordmark: white letters with a teal reflection in the water below, broken into a few soft ripples. */
 .brand .word { position: relative; font-weight: 700; letter-spacing: .24em; color: #fff; }
-.brand .word::after { content: attr(data-text); position: absolute; left: 0; top: 100%; margin-top: -.18em; pointer-events: none;
-  transform: scaleY(-.8) skewX(-10deg); transform-origin: center;
+/* The copy sits on the word and is flipped and slanted about the letters' baseline (1.06em down in Segoe UI), so each
+   reflected letter starts right under its letter. */
+.brand .word::after { content: attr(data-text); position: absolute; left: 0; top: 0; pointer-events: none;
+  transform: scaleY(-.8) skewX(-10deg); transform-origin: 0 1.06em;
   background: repeating-linear-gradient(to bottom, var(--accent) 0 .2em, transparent .2em .27em);
   -webkit-background-clip: text; background-clip: text; color: transparent; opacity: .8;
   -webkit-mask-image: linear-gradient(to bottom, transparent 10%, #000 100%); }
