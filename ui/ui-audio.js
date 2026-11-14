@@ -32,10 +32,15 @@ const UISound = (() => {
     const now = performance.now();
     if (now - (last[name] ?? -1e9) < (name === 'move' ? 55 : 90)) return; // fast scrolling doesn't machine-gun
     last[name] = now;
-    if (files[name]) { const a = files[name].cloneNode(); a.volume = Math.min(1, volume * 2); a.play().catch(() => {}); return; }
+    // A little random pitch each time so repeated sounds (scrolling) don't sound robotic.
+    // Moving varies most (about ±5%), launch/error barely, so they stay recognisable.
+    const spread = { move: .05, tab: .035, select: .025, open: .025, back: .025, launch: .012, error: .012 }[name];
+    const pitch = 1 + (Math.random() * 2 - 1) * spread;
+    if (files[name]) { const a = files[name].cloneNode(); a.volume = Math.min(1, volume * 2); a.preservesPitch = false; a.playbackRate = pitch; a.play().catch(() => {}); return; }
     try {
       const c = engine(), t = c.currentTime + .004;
-      for (const [freq, dur, off, gain] of cues[name]) {
+      for (const [baseFreq, dur, off, gain] of cues[name]) {
+        const freq = baseFreq * pitch;
         const tone = c.createOscillator(), env = c.createGain();
         tone.type = name === 'move' ? 'sine' : 'triangle';
         tone.frequency.setValueAtTime(freq, t + off);
