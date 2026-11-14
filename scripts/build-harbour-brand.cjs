@@ -18,8 +18,8 @@ const SHINE=`<g fill="none" stroke="#fff" stroke-linecap="round" opacity=".95">`
   `<path d="M56 12.5A10.5 10.5 0 0 1 66.5 7.6" stroke-width="4"/>`+
   `<path d="M61.5 31V104" stroke-width="4"/>`+
   `<path d="M39 43.5H57" stroke-width="3.5"/>`+
-  `<path d="M16.4 76Q17.4 104 38 112.2" stroke-width="3.5"/>`+
-  `<path d="M18.6 60L11.6 77" stroke-width="3"/></g>`;
+  `<path d="M18.2 75Q18.6 104.8 48 112.9" stroke-width="5"/>`+
+  `<path d="M18.6 60L11.2 77.5" stroke-width="4.5"/></g>`;
 const defs=id=>`<defs><linearGradient id="${id}ANCHOR" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#7cefdf"/><stop offset=".5" stop-color="${C.sea1}"/><stop offset="1" stop-color="#2ba99d"/></linearGradient></defs>`;
 const mark=(id='m')=>defs(id)+ANCHOR(`url(#${id}ANCHOR)`)+SHINE;
 const svg=(viewBox,content,extra='role="img"')=>`<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}" ${extra}>${content}</svg>`;
