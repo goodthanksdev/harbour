@@ -29,6 +29,23 @@ fs.renameSync(path.join(out, 'electron.exe'), path.join(out, 'Harbour.exe'));
 fs.rmSync(path.join(out, 'resources', 'default_app.asar'), { force: true });
 fs.writeFileSync(path.join(out, 'electron-version.txt'), electronVersion + '\n');  // updates check this
 
+// Harbour's icon, name and version on Harbour.exe, with rcedit (Electron's tool for this). Its releases publish no
+// checksum, so the one Harbour uses is pinned here; a download that doesn't match is refused.
+const RCEDIT = { url: 'https://github.com/electron/rcedit/releases/download/v2.0.0/rcedit-x64.exe',
+  sha256: '3e7801db1a5edbec91b49a24a094aad776cb4515488ea5a4ca2289c400eade2a' };
+async function rcedit() {
+  const file = path.join(root, 'node_modules', '.cache', 'rcedit-x64.exe');
+  const ok = () => fs.existsSync(file) && createHash('sha256').update(fs.readFileSync(file)).digest('hex') === RCEDIT.sha256;
+  if (!ok()) {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const r = await fetch(RCEDIT.url);
+    if (!r.ok) throw new Error(`rcedit download failed: HTTP ${r.status}`);
+    fs.writeFileSync(file, Buffer.from(await r.arrayBuffer()));
+    if (!ok()) { fs.rmSync(file, { force: true }); throw new Error("rcedit download doesn't match its pinned checksum"); }
+  }
+  return file;
+}
+
 // Harbour itself.
 const app = path.join(out, 'resources', 'app');
 for (const f of APP_FILES) fs.cpSync(path.join(root, f), path.join(app, f), { recursive: true });
@@ -38,8 +55,18 @@ delete slim.scripts;
 fs.writeFileSync(path.join(app, 'package.json'), JSON.stringify(slim, null, 2) + '\n');
 fs.copyFileSync(path.join(root, 'ui', 'assets', 'brand', 'harbour.ico'), path.join(out, 'Harbour.ico'));
 
+(async () => {
+const version = `${pkg.version}.0`.split('.').slice(0, 4).join('.');
+execFileSync(await rcedit(), [path.join(out, 'Harbour.exe'),
+  '--set-icon', path.join(root, 'ui', 'assets', 'brand', 'harbour.ico'),
+  '--set-file-version', version, '--set-product-version', version,
+  '--set-version-string', 'ProductName', 'Harbour', '--set-version-string', 'FileDescription', 'Harbour',
+  '--set-version-string', 'CompanyName', 'Harbour', '--set-version-string', 'OriginalFilename', 'Harbour.exe',
+  '--set-version-string', 'InternalName', 'Harbour', '--set-version-string', 'LegalCopyright', 'MIT License'], { stdio: 'inherit' });
+
 // Zip it with the bsdtar built into Windows, and write its checksum.
 execFileSync(path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe'), ['-a', '-c', '-f', zip, '-C', dist, name], { stdio: 'inherit' });
 const hash = createHash('sha256').update(fs.readFileSync(zip)).digest('hex');
 fs.writeFileSync(zip + '.sha256', `${hash}  ${path.basename(zip)}\n`);
 console.log(`${path.relative(root, zip)}  ${(fs.statSync(zip).size / 1048576).toFixed(0)} MB  sha256 ${hash}`);
+})().catch(e => { console.error(e.message); process.exit(1); });
