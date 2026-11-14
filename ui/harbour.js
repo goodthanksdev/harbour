@@ -185,8 +185,13 @@ $('#updatePill').onclick = openUpdates;
 
 function refreshBadges() {
   [...$('#row').children].forEach((it, i) => {
-    const g = S.list[i]; it.querySelector('.badge')?.remove();
-    if (S.recomp[g?.id]?.updateAvailable) it.append(el('span', 'badge', 'UPDATE'));
+    const g = S.list[i]; it.querySelector('.port-dot')?.remove();
+    if (!g?.recomp) return;
+    // PC ports: a dot in the emulator badge's colours. Teal up to date, yellow update, grey unknown.
+    const st = S.recomp[g.id];
+    const [state, text] = st?.updateAvailable ? ['update', `${st.latest?.tag} available`]
+      : st?.updateAvailable === false ? ['ok', 'Up to date'] : ['missing', st?.repo ? 'Version unknown' : 'No update source'];
+    const dot = el('span', `port-dot ${state}`); dot.title = text; it.append(dot);
   });
   const n = pendingUpdates().length;
   const pill = $('#updatePill'); pill.hidden = !n; pill.textContent = `${n} update${n === 1 ? '' : 's'}`;
