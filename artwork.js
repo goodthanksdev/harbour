@@ -1,348 +1,460 @@
-// Artwork downloads: covers, screenshots, logos and background art. No account or API key required.
-// Sources: the LaunchBox games database, GameTDB (Switch covers) and libretro thumbnails.
+// Artwork: box covers, logos, background art and screenshots, saved in data/media/<console>/<kind folder>/.
+//
+// Where pictures come from, tried in this order for each game:
+//   1. the LaunchBox Games Database (see launchbox.js): the best and most complete source;
+//   2. GameTDB, for Switch box covers;
+//   3. libretro's thumbnail collection (covers and screenshots), matched by file name.
+// No account or key is needed for any of them.
 const fs = require('node:fs');
+const fsp = fs.promises;
 const path = require('node:path');
-const {pathToFileURL,fileURLToPath} = require('node:url');
-const {Readable} = require('node:stream');
-const {pipeline} = require('node:stream/promises');
-const {randomUUID} = require('node:crypto');
+const { pathToFileURL, fileURLToPath } = require('node:url');
+const { Readable } = require('node:stream');
+const { pipeline } = require('node:stream/promises');
+const { randomUUID } = require('node:crypto');
+
+// Artwork kinds: the folder they're saved in, and libretro's folder name where libretro has them.
 const TYPES = {
-  front:{folder:'covers',remote:'Named_Boxarts'},
-  screenshot:{folder:'screenshots',remote:'Named_Snaps'},
-  logo:{folder:'logos'},
-  fanart:{folder:'fanart'},
+  front: { folder: 'covers', libretro: 'Named_Boxarts' },
+  screenshot: { folder: 'screenshots', libretro: 'Named_Snaps' },
+  logo: { folder: 'logos' },
+  fanart: { folder: 'fanart' },
 };
-const IMAGE_EXTS = ['.png','.jpg','.jpeg','.webp'];
-// Kinds worth replacing when a sharper copy turns up, and the width that counts as sharp enough.
-const UPGRADE_WIDTH = {front:700};
-// Width from a PNG or JPEG header, without decoding the picture.
-function imageWidth(b) {
-  if(!b||b.length<24)return 0;
-  if(b.subarray(1,4).toString()==='PNG')return b.readUInt32BE(16);
-  if(b[0]===0xff&&b[1]===0xd8) {
-    for(let i=2;i+9<b.length;) {
-      if(b[i]!==0xff){i++;continue}
-      const marker=b[i+1];
-      if(marker>=0xc0&&marker<=0xcf&&![0xc4,0xc8,0xcc].includes(marker))return b.readUInt16BE(i+7);
-      i+=2+b.readUInt16BE(i+2);
-    }
+const SAVED_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp'];
+const SHARP_ENOUGH = { front: 700 };     // covers narrower than this are replaced when a sharper one turns up
+const MAX_IMAGE_BYTES = 20 * 1048576;
+const MAX_DOWNLOAD_BYTES = 600 * 1048576;
+const PARALLEL_REQUESTS = 4;
+const REQUEST_TIMEOUT = 18000;
+const AGENT = { 'User-Agent': 'Harbour-Frontend' };
+const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const isPng = b => b.length >= 24 && b.subarray(0, 8).equals(PNG_MAGIC);
+
+const cancelled = () => new DOMException('Cancelled', 'AbortError');
+const stopIfCancelled = signal => { if (signal?.aborted) throw cancelled(); };
+
+// Picture width from the PNG or JPEG header, without decoding it (0 when unknown).
+function widthOf(bytes) {
+  if (!bytes || bytes.length < 24) return 0;
+  if (isPng(bytes)) return bytes.readUInt32BE(16);
+  if (bytes[0] !== 0xff || bytes[1] !== 0xd8) return 0;
+  let at = 2;
+  while (at + 9 < bytes.length) {
+    if (bytes[at] !== 0xff) { at++; continue; }
+    const marker = bytes[at + 1];
+    const startOfFrame = marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc;
+    if (startOfFrame) return bytes.readUInt16BE(at + 7);
+    at += 2 + bytes.readUInt16BE(at + 2);
   }
   return 0;
 }
-function fileWidth(file) {
-  try {const fd=fs.openSync(file,'r');try{const b=Buffer.alloc(65536);const n=fs.readSync(fd,b,0,b.length,0);return imageWidth(b.subarray(0,n))}finally{fs.closeSync(fd)}}catch{return 0}
+function widthOfFile(file) {
+  try {
+    const head = Buffer.alloc(65536);
+    const fd = fs.openSync(file, 'r');
+    try { return widthOf(head.subarray(0, fs.readSync(fd, head, 0, head.length, 0))); } finally { fs.closeSync(fd); }
+  } catch {
+    return 0;
+  }
 }
-function createArtworkService({dataDir,getSystems,getGames,normalize,fetchImpl=fetch,onProgress=()=>{},source='https://thumbnails.libretro.com',decodeImage,launchbox=null,encodeImage=null,
-  switchDatabase='https://www.gametdb.com/switchtdb.txt?LANG=EN',switchImages='https://art.gametdb.com/switch'}) {
-  const indexes=new Map(), unavailable=new Set(), inflight=new Map();
-  let switchIndex;
-  let active=0,job=null,controller=null,lastEmit=0;
-  const queue=[];
-  const aborted=signal=>{if(signal?.aborted)throw new DOMException('Cancelled','AbortError')};
-  function slot(fn,signal) {
-    return new Promise((resolve,reject)=>{
-      const run=async()=>{
-        active++;
-        try {aborted(signal);resolve(await fn())} catch(e){reject(e)}
-        finally {active--;queue.shift()?.()}
+
+// Marks an error as "the source's list couldn't be read" (not a cancel), so the source is skipped for the run.
+const listError = signal => e => { if (!signal?.aborted) e.listFailed = true; throw e; };
+
+// Waits for a promise, or rejects as soon as the signal is cancelled.
+function untilCancelled(promise, signal) {
+  if (!signal) return promise;
+  stopIfCancelled(signal);
+  let onAbort;
+  const stop = new Promise((_, reject) => { onAbort = () => reject(cancelled()); signal.addEventListener('abort', onAbort, { once: true }); });
+  return Promise.race([promise, stop]).finally(() => signal.removeEventListener('abort', onAbort));
+}
+
+function createArtworkService({ dataDir, getSystems, getGames, normalize, fetchImpl = fetch, onProgress = () => {},
+  source = 'https://thumbnails.libretro.com', decodeImage, launchbox = null, encodeImage = null,
+  switchDatabase = 'https://www.gametdb.com/switchtdb.txt?LANG=EN', switchImages = 'https://art.gametdb.com/switch' }) {
+  const indexFolder = path.join(dataDir, 'media', '_index');
+  const mediaFolder = (consoleId, kind) => path.join(dataDir, 'media', consoleId, TYPES[kind].folder);
+
+  // ---- requests: at most a few at once ----
+  let running = 0;
+  const waiting = [];
+  function limited(work, signal) {
+    return new Promise((resolve, reject) => {
+      const go = async () => {
+        running++;
+        try { stopIfCancelled(signal); resolve(await work()); } catch (e) { reject(e); } finally { running--; waiting.shift()?.(); }
       };
-      if(active<4)run();else queue.push(run);
+      if (running < PARALLEL_REQUESTS) go(); else waiting.push(go);
     });
   }
-  async function waitFor(promise,signal) {
-    if(!signal)return promise;
-    aborted(signal);
-    let listener;
-    try {return await Promise.race([promise,new Promise((_,reject)=>{
-      listener=()=>reject(new DOMException('Cancelled','AbortError'));
-      signal.addEventListener('abort',listener,{once:true});
-    })])} finally {signal.removeEventListener('abort',listener)}
+  // A text file, or null on 404.
+  function getText(url, signal) {
+    return limited(async () => {
+      const timeout = AbortSignal.timeout(REQUEST_TIMEOUT);
+      const r = await fetchImpl(url, { headers: AGENT, signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
+      if (r.status === 404) return null;
+      if (!r.ok) throw new Error(`Artwork server returned HTTP ${r.status}`);
+      return r.text();
+    }, signal);
   }
-  async function request(url,kind,signal) {
-    return slot(async()=>{
-      const combined=signal ? AbortSignal.any([signal,AbortSignal.timeout(18000)]) : AbortSignal.timeout(18000);
-      const response=await fetchImpl(url,{headers:{'User-Agent':'Harbour-Frontend'},signal:combined});
-      if(response.status===404)return null;
-      if(!response.ok)throw new Error(`Artwork server returned HTTP ${response.status}`);
-      if(kind==='text')return response.text();
-      if(kind==='pdf') {
-        // Manuals: PDF only, up to 150 MB.
-        const chunks=[];let total=0;
-        for await(const chunk of response.body){total+=chunk.length;if(total>150*1024*1024){await response.body.cancel?.().catch(()=>{});throw new Error('Manual is too large')}chunks.push(Buffer.from(chunk))}
-        const bytes=Buffer.concat(chunks);
-        if(bytes.subarray(0,5).toString('latin1')!=='%PDF-')throw new Error('Manual source did not return a PDF');
-        return bytes;
+  // A picture as PNG bytes (other formats are converted by decodeImage), or null on 404.
+  function getImage(url, signal) {
+    return limited(async () => {
+      const timeout = AbortSignal.timeout(REQUEST_TIMEOUT);
+      const r = await fetchImpl(url, { headers: AGENT, signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
+      if (r.status === 404) return null;
+      if (!r.ok) throw new Error(`Artwork server returned HTTP ${r.status}`);
+      if (Number(r.headers.get('content-length')) > MAX_IMAGE_BYTES) throw new Error('Artwork image is too large');
+      const parts = [];
+      let size = 0;
+      for await (const part of r.body) {
+        size += part.length;
+        if (size > MAX_IMAGE_BYTES) { await r.body.cancel?.().catch(() => {}); throw new Error('Artwork image is too large'); }
+        parts.push(Buffer.from(part));
       }
-      if(Number(response.headers.get('content-length'))>20*1024*1024)throw new Error('Artwork image is too large');
-      const chunks=[];let total=0;
-      for await(const chunk of response.body) {
-        total+=chunk.length;
-        if(total>20*1024*1024){await response.body.cancel?.().catch(()=>{});throw new Error('Artwork image is too large')}
-        chunks.push(Buffer.from(chunk));
-      }
-      let bytes=Buffer.concat(chunks);
-      if(decodeImage && !(bytes.length>=8&&bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))))bytes=await decodeImage(bytes);
-      if(bytes.length<24 || !bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])))throw new Error('Artwork server did not return a PNG image');
-      if(!bytes.readUInt32BE(16)||!bytes.readUInt32BE(20)||bytes.readUInt32BE(16)>16384||bytes.readUInt32BE(20)>16384)throw new Error('Invalid artwork dimensions');
+      let bytes = Buffer.concat(parts);
+      if (!isPng(bytes) && decodeImage) bytes = await decodeImage(bytes);
+      if (!isPng(bytes)) throw new Error('Artwork server did not return a picture Harbour can read');
+      const w = bytes.readUInt32BE(16), h = bytes.readUInt32BE(20);
+      if (!w || !h || w > 16384 || h > 16384) throw new Error('Artwork picture has an impossible size');
       return bytes;
-    },signal);
+    }, signal);
   }
-  // Streams a large file (the LaunchBox database) straight to disk.
-  async function download(url,file,onBytes=()=>{}) {
-    const response=await fetchImpl(url,{headers:{'User-Agent':'Harbour-Frontend'},signal:AbortSignal.timeout(15*60e3)});
-    if(!response.ok||!response.body)throw new Error(`Database download failed (HTTP ${response.status})`);
-    if(Number(response.headers.get('content-length'))>600*1024*1024)throw new Error('Database download is unexpectedly large');
-    const tmp=file+'.part';
-    const total=Number(response.headers.get('content-length'))||0;let got=0;
-    const counter=async function*(source){for await(const chunk of source){got+=chunk.length;onBytes(got,total);yield chunk}};
-    try {await pipeline(Readable.fromWeb(response.body),counter,fs.createWriteStream(tmp));await fs.promises.rename(tmp,file)}
-    catch(e){await fs.promises.unlink(tmp).catch(()=>{});throw e}
+  // Streams a big file (the LaunchBox database) to disk, reporting bytes as they arrive.
+  async function download(url, file, onBytes = () => {}) {
+    const r = await fetchImpl(url, { headers: AGENT, signal: AbortSignal.timeout(15 * 60e3) });
+    if (!r.ok || !r.body) throw new Error(`Database download failed (HTTP ${r.status})`);
+    const total = Number(r.headers.get('content-length')) || 0;
+    if (total > MAX_DOWNLOAD_BYTES) throw new Error('Database download is unexpectedly large');
+    const part = file + '.part';
+    let got = 0;
+    async function* counted(chunks) { for await (const c of chunks) { got += c.length; onBytes(got, total); yield c; } }
+    try {
+      await pipeline(Readable.fromWeb(r.body), counted, fs.createWriteStream(part));
+      await fsp.rename(part, file);
+    } catch (e) {
+      await fsp.unlink(part).catch(() => {});
+      throw e;
+    }
   }
-  function switchNames(refresh=false) {
-    if(switchIndex&&!refresh)return switchIndex;
-    const pending=(async()=>{
-      const file=path.join(dataDir,'media','_index','gametdb-switch.txt');
-      let text;
-      if(!refresh)try{if(Date.now()-fs.statSync(file).mtimeMs<7*864e5)text=fs.readFileSync(file,'utf8')}catch{}
-      if(!text) {
-        text=await request(switchDatabase,'text');
-        if(!text||!/^TITLES\s*=/m.test(text))throw new Error('Could not read the GameTDB Switch title list');
-        fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,text);
+
+  // ---- names: the loose keys a game is looked up by ----
+  // "Super Mario 64 (USA) [!]" and "SuperMario64" both become one key; version numbers are ignored.
+  function titleKeys(game) {
+    const tidy = s => String(s || '').replace(/\bv?\d+(?:\.\d+)+\b/gi, '').replace(/\s*\([^)]*\)|\s*\[[^\]]*\]/g, '');
+    const keys = [game.title, game.base].map(s => normalize(tidy(s)));
+    keys.push(normalize(tidy(game.base).replace(/([a-z])([A-Z])/g, '$1 $2')));
+    return [...new Set(keys.filter(Boolean))];
+  }
+
+  // ---- source: GameTDB (Switch covers) ----
+  let switchTitles = null;  // promise of Map(key -> [title codes])
+  function loadSwitchTitles(refresh) {
+    if (switchTitles && !refresh) return switchTitles;
+    const job = (async () => {
+      const file = path.join(indexFolder, 'gametdb-switch.txt');
+      let text = null;
+      if (!refresh) try { if (Date.now() - fs.statSync(file).mtimeMs < 7 * 864e5) text = fs.readFileSync(file, 'utf8'); } catch {}
+      if (!text) {
+        text = await getText(switchDatabase);
+        if (!text || !/^TITLES\s*=/m.test(text)) throw new Error('Could not read the GameTDB Switch title list');
+        fs.mkdirSync(indexFolder, { recursive: true });
+        fs.writeFileSync(file, text);
       }
-      const map=new Map();
-      for(const line of text.split(/\r?\n/)) {
-        const match=line.match(/^([A-Z0-9]{5}) = (.+)$/);if(!match)continue;
-        const key=normalize(match[2]);if(!key)continue;
-        if(!map.has(key))map.set(key,[]);map.get(key).push(match[1]);
+      const byKey = new Map();
+      for (const line of text.split(/\r?\n/)) {
+        const m = /^([A-Z0-9]{5}) = (.+)$/.exec(line);
+        const k = m && normalize(m[2]);
+        if (k) byKey.set(k, [...(byKey.get(k) || []), m[1]]);
       }
-      return map;
+      return byKey;
     })();
-    switchIndex=pending;pending.catch(()=>{if(switchIndex===pending)switchIndex=null});return pending;
+    switchTitles = job;
+    job.catch(() => { if (switchTitles === job) switchTitles = null; });
+    return job;
   }
-  const titleKeys=game=>{
-    const clean=s=>s.replace(/\bv?\d+(?:\.\d+)+\b/gi,'').replace(/\s*\([^)]*\)|\s*\[[^\]]*\]/g,'');
-    return [...new Set([normalize(clean(game.title||'')),normalize(clean(game.base)),normalize(clean(game.base).replace(/([a-z])([A-Z])/g,'$1 $2'))].filter(Boolean))];
-  };
-  async function firstImage(urls,signal) {
-    // A single unreadable image (odd JPEG flavours, a dead link) should not hide the next candidate.
-    let failure=null;
-    for(const url of urls) {
-      aborted(signal);
-      try {const bytes=await request(url,'image',signal);if(bytes)return bytes}
-      catch(e){if(signal?.aborted)throw e;failure=e}
-    }
-    if(failure)throw failure;
+  async function fromGameTdb(game, kind, signal, refresh) {
+    if (kind !== 'front') return null;
+    const byKey = await untilCancelled(loadSwitchTitles(refresh), signal).catch(listError(signal));
+    const codes = [...new Set(titleKeys(game).flatMap(k => byKey.get(k) || []))].slice(0, 4);
+    for (const code of codes)
+      for (const region of ['US', 'EN', 'JA']) {
+        stopIfCancelled(signal);
+        const bytes = await getImage(`${switchImages}/cover/${region}/${code}.jpg`, signal);
+        if (bytes) return bytes;
+      }
     return null;
   }
-  // Tries each source in order. A source that fails is skipped for the rest of the run;
-  // an error is only reported when no source could even be asked.
-  async function remoteImage(game,sys,type,{signal,retryMissing,refreshed,failures=new Map(),hqOnly=false,background=false}) {
-    const steps=[],refreshOnce=key=>{const r=retryMissing&&refreshed&&!refreshed.has(key);if(r)refreshed.add(key);return r};
-    const gametdb=()=>switchImage(game,type,{signal,retryMissing,refreshed,failures});
-    const isSwitch=sys.artworkProvider==='gametdb-switch';
-    // Automatic lookups never start the large LaunchBox download; a download from Settings does.
-    if(launchbox&&(!background||launchbox.available()))steps.push(['launchbox',async()=>firstImage(await launchbox.find(sys.id,titleKeys(game),type,{refresh:!background&&refreshOnce('launchbox'),offline:background}),signal)]);
-    if(isSwitch)steps.push(['gametdb-switch',gametdb]);
-    if(!hqOnly&&sys.libretro&&TYPES[type].remote)steps.push([`${sys.id}/${type}`,()=>libretroImage(sys,type,game,{signal,retryMissing,refreshed,failures})]);
-    const errors=[];let asked=0;
-    for(const [key,step] of steps) {
-      if(failures.has(key)){errors.push(failures.get(key));continue}
-      try {asked++;const bytes=await step();if(bytes)return bytes}
-      catch(e){if(signal?.aborted)throw e;asked--;errors.push(e.message);if(key==='launchbox')failures.set(key,e.message)}
-    }
-    if(!asked&&errors.length)throw new Error(errors[0]);
-    return null;
-  }
-  async function switchImage(game,type,{signal,retryMissing,refreshed,failures}) {
-    if(type!=='front')return null;
-    const indexKey='gametdb-switch';
-    if(failures?.has(indexKey))throw new Error(failures.get(indexKey));
-    const refresh=retryMissing&&refreshed&&!refreshed.has(indexKey);if(refresh)refreshed.add(indexKey);
-    let idx;
-    try{idx=await waitFor(switchNames(refresh),signal)}catch(e){if(!signal?.aborted)failures?.set(indexKey,e.message);throw e}
-    const keys=titleKeys(game);
-    const codes=[...new Set(keys.flatMap(k=>idx.get(k)||[]))].slice(0,4);
-    const category='cover',extension='jpg';
-    for(const code of codes)for(const region of ['US','EN','JA']) {
-      aborted(signal);
-      const bytes=await request(`${switchImages}/${category}/${region}/${code}.${extension}`,'image',signal);
-      if(bytes)return bytes;
-    }
-    return null;
-  }
-  function index(sys,type,refresh=false) {
-    const key=`${sys.id}/${type}`;
-    if(!refresh&&indexes.has(key))return indexes.get(key);
-    const promise=(async()=>{
-      const file=path.join(dataDir,'media','_index',`${sys.id}-${type}.json`);
-      let names;
-      if(!refresh) {
-        for(const cached of [file,...(type==='front'?[path.join(dataDir,'media','_index',sys.id+'.json')]:[])]) {
-          try {if(Date.now()-fs.statSync(cached).mtimeMs<30*864e5){names=JSON.parse(fs.readFileSync(cached,'utf8'));if(Array.isArray(names))break;names=null}}catch{}
+
+  // ---- source: libretro thumbnails (a folder listing per console and kind, cached for a month) ----
+  const libretroLists = new Map();  // "console/kind" -> promise of { exact, loose }
+  function loadLibretroList(console_, kind, refresh) {
+    const id = `${console_.id}/${kind}`;
+    if (!refresh && libretroLists.has(id)) return libretroLists.get(id);
+    const job = (async () => {
+      const file = path.join(indexFolder, `${console_.id}-${kind}.json`);
+      let names = null;
+      if (!refresh) {
+        // Older Harbour versions kept the cover list as <console>.json.
+        const candidates = [file, ...(kind === 'front' ? [path.join(indexFolder, console_.id + '.json')] : [])];
+        for (const f of candidates) try {
+          if (Date.now() - fs.statSync(f).mtimeMs < 30 * 864e5) { const list = JSON.parse(fs.readFileSync(f, 'utf8')); if (Array.isArray(list)) { names = list; break; } }
+        } catch {}
+      }
+      if (!names) {
+        const html = await getText(`${source}/${encodeURIComponent(console_.libretro)}/${TYPES[kind].libretro}/`);
+        names = [];
+        for (const m of (html || '').matchAll(/href="([^"?]*?\.png)"/gi)) {
+          try { const n = decodeURIComponent(m[1]); if (!n.includes('/') && path.basename(n) === n) names.push(n); } catch {}
         }
+        if (html !== null && !names.length) throw new Error(`Could not read the ${TYPES[kind].libretro} artwork list`);
+        fs.mkdirSync(indexFolder, { recursive: true });
+        fs.writeFileSync(file, JSON.stringify(names));
       }
-      if(!names) {
-        const html=await request(`${source}/${encodeURIComponent(sys.libretro)}/${TYPES[type].remote}/`,'text');
-        names=html===null ? [] : [...html.matchAll(/href="([^"?]*?\.png)"/gi)].flatMap(m=>{
-          try {const name=decodeURIComponent(m[1]);return path.basename(name)===name&&!name.includes('/')?[name]:[]}catch{return []}
-        });
-        if(html!==null&&!names.length)throw new Error(`Could not read the ${TYPES[type].remote} artwork list`);
-        fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,JSON.stringify(names));
+      // US releases first, then Europe/World, so a loose match prefers them.
+      const order = n => (/\(USA/.test(n) ? 0 : /\((Europe|World)/.test(n) ? 1 : 2);
+      const exact = new Map(), loose = new Map();
+      for (const n of names.filter(x => typeof x === 'string').sort((a, b) => order(a) - order(b))) {
+        exact.set(n.toLowerCase(), n);
+        const k = normalize(n.replace(/\.png$/i, ''));
+        if (k && !loose.has(k)) loose.set(k, n);
       }
-      const exact=new Map(),loose=new Map();
-      const rank=n=>/\(USA/.test(n)?0:/\((Europe|World)/.test(n)?1:2;
-      for(const name of names.filter(n=>typeof n==='string').sort((a,b)=>rank(a)-rank(b))) {
-        exact.set(name.toLowerCase(),name);
-        const normalized=normalize(name.replace(/\.png$/i,''));
-        if(normalized&&!loose.has(normalized))loose.set(normalized,name);
-      }
-      return {exact,loose};
+      return { exact, loose };
     })();
-    indexes.set(key,promise);
-    promise.catch(()=>{if(indexes.get(key)===promise)indexes.delete(key)});
-    return promise;
+    libretroLists.set(id, job);
+    job.catch(() => { if (libretroLists.get(id) === job) libretroLists.delete(id); });
+    return job;
   }
-  function safeBase(base) {
-    if(typeof base!=='string'||!base||base==='.'||base==='..'||/[<>:"/\\|?*\x00-\x1f]/.test(base))throw new Error('Invalid game filename');
+  async function fromLibretro(console_, game, kind, signal, refresh) {
+    const { exact, loose } = await untilCancelled(loadLibretroList(console_, kind, refresh), signal).catch(listError(signal));
+    const name = exact.get(`${game.base}.png`.toLowerCase()) || loose.get(normalize(game.base));
+    if (!name) return null;
+    return getImage(`${source}/${encodeURIComponent(console_.libretro)}/${TYPES[kind].libretro}/${encodeURIComponent(name)}`, signal);
+  }
+
+  // ---- finding a picture for one game and kind ----
+  // The first of a list of URLs that gives a usable picture; one dead link doesn't stop the rest.
+  async function firstWorking(urls, signal) {
+    let lastError = null;
+    for (const url of urls) {
+      stopIfCancelled(signal);
+      try { const bytes = await getImage(url, signal); if (bytes) return bytes; } catch (e) { if (signal?.aborted) throw e; lastError = e; }
+    }
+    if (lastError) throw lastError;
+    return null;
+  }
+  // Asks each source in turn. A source that breaks (its list won't load) is skipped for the rest of the run
+  // (run.broken); an error only reaches the caller when no source could be asked at all.
+  // run.refreshed remembers which lists were already re-fetched in this run.
+  async function fetchPicture(game, console_, kind, { signal, run, retryMissing, sharpOnly = false, background = false }) {
+    const freshOnce = name => { if (!retryMissing || run.refreshed.has(name)) return false; run.refreshed.add(name); return true; };
+    const sources = [];
+    // Background lookups never start the big LaunchBox download; a download from Settings may.
+    if (launchbox && (!background || launchbox.available()))
+      sources.push(['launchbox', async () => firstWorking(
+        await launchbox.find(console_.id, titleKeys(game), kind, { refresh: !background && freshOnce('launchbox'), offline: background }), signal)]);
+    if (console_.artworkProvider === 'gametdb-switch')
+      sources.push(['gametdb-switch', () => fromGameTdb(game, kind, signal, freshOnce('gametdb-switch'))]);
+    if (!sharpOnly && console_.libretro && TYPES[kind].libretro)
+      sources.push([`${console_.id}/${kind}`, () => fromLibretro(console_, game, kind, signal, freshOnce(`${console_.id}/${kind}`))]);
+    const problems = [];
+    let asked = 0;
+    for (const [name, ask] of sources) {
+      if (run.broken.has(name)) { problems.push(run.broken.get(name)); continue; }
+      try {
+        asked++;
+        const bytes = await ask();
+        if (bytes) return bytes;
+      } catch (e) {
+        if (signal?.aborted) throw e;
+        asked--;
+        problems.push(e.message);
+        // LaunchBox breaks as a whole; GameTDB and libretro only when their list can't be read (one bad picture is fine).
+        if (name === 'launchbox' || e.listFailed) run.broken.set(name, e.message);
+      }
+    }
+    if (!asked && problems.length) throw new Error(problems[0]);
+    return null;
+  }
+
+  // ---- saving ----
+  function checkBase(base) {
+    if (typeof base !== 'string' || !base || base === '.' || base === '..' || /[<>:"/\\|?*\x00-\x1f]/.test(base)) throw new Error('Invalid game filename');
     return base;
   }
-  async function libretroImage(sys,type,game,{signal,retryMissing,refreshed,failures}) {
-    const indexKey=`${sys.id}/${type}`;
-    const refresh=retryMissing&&refreshed&&!refreshed.has(indexKey);
-    if(refresh)refreshed.add(indexKey);
-    let idx;
-    try{idx=await waitFor(index(sys,type,refresh),signal)}catch(e){if(!signal?.aborted)failures?.set(indexKey,e.message);throw e}
-    const base=game.base,match=idx.exact.get((base+'.png').toLowerCase())||idx.loose.get(normalize(base));
-    if(!match)return null;
-    return request(`${source}/${encodeURIComponent(sys.libretro)}/${TYPES[type].remote}/${encodeURIComponent(match)}`,'image',signal);
-  }
-  // Path of an image Harbour downloaded itself (media/<system>/<type folder>/), so it may be replaced
-  // by a sharper copy. Images people chose themselves live elsewhere and are never touched.
-  function ownedFile(url,sys,type) {
-    if(typeof url!=='string'||!url.startsWith('file:'))return null;
+  // A picture Harbour saved itself (in media/<console>/<kind folder>/): only those may be replaced by a sharper copy.
+  // Pictures people picked themselves live elsewhere and are never touched.
+  function ourFile(url, console_, kind) {
+    if (typeof url !== 'string' || !url.startsWith('file:')) return null;
     try {
-      const file=fileURLToPath(url.split('?')[0]),folder=path.join(dataDir,'media',sys.id,TYPES[type].folder)+path.sep;
-      return file.toLowerCase().startsWith(folder.toLowerCase())&&!file.slice(folder.length).includes(path.sep)&&IMAGE_EXTS.includes(path.extname(file).toLowerCase())&&fs.existsSync(file)?file:null;
-    } catch {return null}
+      const file = fileURLToPath(url.split('?')[0]);
+      const folder = mediaFolder(console_.id, kind) + path.sep;
+      const inside = file.toLowerCase().startsWith(folder.toLowerCase()) && !file.slice(folder.length).includes(path.sep);
+      return inside && SAVED_EXTENSIONS.includes(path.extname(file).toLowerCase()) && fs.existsSync(file) ? file : null;
+    } catch {
+      return null;
+    }
   }
-  // A downloaded image in this game's type folder, whatever format it was saved in.
-  function savedFile(sys,type,base) {
-    const dir=path.join(dataDir,'media',sys.id,TYPES[type].folder);
-    for(const ext of IMAGE_EXTS){const file=path.join(dir,base+ext);try{if(fs.statSync(file).size>0)return file}catch{}}
+  function existingFile(console_, kind, base) {
+    for (const ext of SAVED_EXTENSIONS) {
+      const file = path.join(mediaFolder(console_.id, kind), base + ext);
+      try { if (fs.statSync(file).size > 0) return file; } catch {}
+    }
     return null;
   }
-  // Large photos are scaled down and stored as JPEG; see encodeArtwork in main.js.
-  const encode=async(bytes,type)=>encodeImage ? encodeImage(bytes,type) : {bytes,ext:'png'};
-  async function one(game,type,{signal,retryMissing=false,upgrade=false,background=false,refreshed,failures}={}) {
-    aborted(signal);
-    const sys=getSystems().find(s=>s.id===game.system);
-    const base=safeBase(game.base);
-    const kept=game.media?.[type] ? ownedFile(game.media[type],sys,type) : savedFile(sys,type,base);
-    const keptUrl=game.media?.[type]||(kept&&pathToFileURL(kept).href);
-    if(keptUrl) {
-      const oldWidth=kept&&upgrade&&UPGRADE_WIDTH[type] ? fileWidth(kept) : 0;
-      if(!oldWidth||oldWidth>=UPGRADE_WIDTH[type])return {existing:1,media:{[type]:keptUrl}};
-      const key=`${sys.id}/${base}/${type}/upgrade`;
-      if(inflight.has(key))return waitFor(inflight.get(key),signal);
-      const task=(async()=>{
-        let bytes;
-        try {bytes=await remoteImage(game,sys,type,{signal,retryMissing,refreshed,failures,hqOnly:true,background})}catch(e){if(signal?.aborted)throw e;return {existing:1,media:{[type]:keptUrl}}}
-        if(!bytes)return {existing:1,media:{[type]:keptUrl}};
-        const saved=await encode(bytes,type);
-        if(imageWidth(saved.bytes)<=oldWidth)return {existing:1,media:{[type]:keptUrl}};
-        aborted(signal);
-        const target=path.join(path.dirname(kept),path.basename(kept,path.extname(kept))+'.'+saved.ext);
-        const tmp=`${target}.${randomUUID()}.tmp`;
-        try {await fs.promises.writeFile(tmp,saved.bytes);await fs.promises.rename(tmp,target)}catch(e){await fs.promises.unlink(tmp).catch(()=>{});throw e}
-        if(target!==kept)await fs.promises.unlink(kept).catch(()=>{});
-        // A new query string makes the window load the new picture instead of its cached copy.
-        return {downloaded:1,upgraded:1,media:{[type]:`${pathToFileURL(target).href}?v=${Date.now()}`}};
-      })();
-      inflight.set(key,task);
-      try{return await task}finally{if(inflight.get(key)===task)inflight.delete(key)}
-    }
-    const key=`${sys.id}/${base}/${type}`;
-    if(!retryMissing&&unavailable.has(key))return {missing:1,media:{}};
-    if(inflight.has(key)) {
-      const shared=await waitFor(inflight.get(key),signal);
-      return shared.downloaded ? {...shared,downloaded:0,existing:1}:shared;
-    }
-    const task=(async()=>{
-      const bytes=await remoteImage(game,sys,type,{signal,retryMissing,refreshed,failures,background});
-      if(!bytes){unavailable.add(key);return {missing:1,media:{}}}
-      const saved=await encode(bytes,type);
-      aborted(signal);
-      const file=path.join(dataDir,'media',sys.id,TYPES[type].folder,base+'.'+saved.ext);
-      await fs.promises.mkdir(path.dirname(file),{recursive:true});
-      // Exclusive creation preserves files added by another download or by the user.
-      let handle;
-      try {
-        handle=await fs.promises.open(file,'wx');
-        try {await handle.writeFile(saved.bytes)}catch(e){await handle.close();handle=null;await fs.promises.unlink(file).catch(()=>{});throw e}
-      } catch(e) {if(e.code==='EEXIST')return {existing:1,media:{[type]:pathToFileURL(file).href}};throw e}
-      finally {await handle?.close()}
-      unavailable.delete(key);
-      return {downloaded:1,media:{[type]:pathToFileURL(file).href}};
-    })();
-    inflight.set(key,task);
-    try{return await task}finally{if(inflight.get(key)===task)inflight.delete(key)}
+  const prepare = (bytes, kind) => (encodeImage ? encodeImage(bytes, kind) : { bytes, ext: 'png' });
+
+  const notFound = new Set();   // "console/base/kind" with nothing anywhere, until a retry
+  const busy = new Map();       // the same picture asked for twice at once shares one download
+  async function shared(id, signal, work) {
+    if (busy.has(id)) return untilCancelled(busy.get(id), signal);
+    const job = work();
+    busy.set(id, job);
+    try { return await job; } finally { if (busy.get(id) === job) busy.delete(id); }
   }
-  async function downloadGame(game,types,options={}) {
-    const result={gameId:game.id,title:game.title,media:{},downloaded:0,upgraded:0,existing:0,missing:0,errors:[],unsupported:false};
-    const sys=getSystems().find(s=>s.id===game.system);
-    const supported=sys&&(sys.libretro||sys.artworkProvider==='gametdb-switch'||launchbox?.platforms[sys.id]);
-    if(!supported){result.unsupported=true;return result}
-    const outcomes=await Promise.all(types.map(async type=>{
-      try {return await one(game,type,options)}catch(e){if(options.signal?.aborted)throw e;return {error:e.message}}
-    }));
-    for(const r of outcomes) {
-      for(const k of ['downloaded','upgraded','existing','missing'])result[k]+=r[k]||0;
-      Object.assign(result.media,r.media);if(r.error)result.errors.push(r.error);
+
+  // One picture for one game. Keeps what's there (unless `upgrade` and it's blurry), else downloads.
+  async function onePicture(game, kind, { signal, run, retryMissing = false, upgrade = false, background = false }) {
+    stopIfCancelled(signal);
+    const console_ = getSystems().find(s => s.id === game.system);
+    const base = checkBase(game.base);
+    const have = game.media?.[kind] ? ourFile(game.media[kind], console_, kind) : existingFile(console_, kind, base);
+    const haveUrl = game.media?.[kind] || (have && pathToFileURL(have).href);
+    const keep = { existing: 1, media: { [kind]: haveUrl } };
+
+    if (haveUrl) {
+      const width = have && upgrade && SHARP_ENOUGH[kind] ? widthOfFile(have) : 0;
+      if (!width || width >= SHARP_ENOUGH[kind]) return keep;
+      return shared(`${console_.id}/${base}/${kind}/sharper`, signal, async () => {
+        let bytes = null;
+        try { bytes = await fetchPicture(game, console_, kind, { signal, run, retryMissing, sharpOnly: true, background }); } catch (e) { if (signal?.aborted) throw e; }
+        if (!bytes) return keep;
+        const saved = await prepare(bytes, kind);
+        if (widthOf(saved.bytes) <= width) return keep;
+        stopIfCancelled(signal);
+        const target = path.join(path.dirname(have), `${path.basename(have, path.extname(have))}.${saved.ext}`);
+        const temp = `${target}.${randomUUID()}.tmp`;
+        try { await fsp.writeFile(temp, saved.bytes); await fsp.rename(temp, target); } catch (e) { await fsp.unlink(temp).catch(() => {}); throw e; }
+        if (target !== have) await fsp.unlink(have).catch(() => {});
+        // The ?v= makes the window load the new picture instead of its cached copy of the old one.
+        return { downloaded: 1, upgraded: 1, media: { [kind]: `${pathToFileURL(target).href}?v=${Date.now()}` } };
+      });
     }
-    // An upgraded image has a new file (and often a new extension): the window must swap it in,
-    // not keep the old address, which now points at a deleted file.
-    if(result.upgraded)result.replace=true;
+
+    const id = `${console_.id}/${base}/${kind}`;
+    if (!retryMissing && notFound.has(id)) return { missing: 1, media: {} };
+    if (busy.has(id)) {
+      const other = await untilCancelled(busy.get(id), signal);
+      return other.downloaded ? { ...other, downloaded: 0, existing: 1 } : other;
+    }
+    return shared(id, signal, async () => {
+      const bytes = await fetchPicture(game, console_, kind, { signal, run, retryMissing, background });
+      if (!bytes) { notFound.add(id); return { missing: 1, media: {} }; }
+      const saved = await prepare(bytes, kind);
+      stopIfCancelled(signal);
+      const file = path.join(mediaFolder(console_.id, kind), `${base}.${saved.ext}`);
+      await fsp.mkdir(path.dirname(file), { recursive: true });
+      // 'wx' never overwrites: a picture saved meanwhile (by another download or by hand) wins.
+      try {
+        await fsp.writeFile(file, saved.bytes, { flag: 'wx' });
+      } catch (e) {
+        if (e.code === 'EEXIST') return { existing: 1, media: { [kind]: pathToFileURL(file).href } };
+        await fsp.unlink(file).catch(() => {});
+        throw e;
+      }
+      notFound.delete(id);
+      return { downloaded: 1, media: { [kind]: pathToFileURL(file).href } };
+    });
+  }
+
+  async function forGame(game, kinds, options) {
+    const result = { gameId: game.id, title: game.title, media: {}, downloaded: 0, upgraded: 0, existing: 0, missing: 0, errors: [], unsupported: false };
+    const console_ = getSystems().find(s => s.id === game.system);
+    if (!console_ || !(console_.libretro || console_.artworkProvider === 'gametdb-switch' || launchbox?.platforms[console_.id])) {
+      result.unsupported = true;
+      return result;
+    }
+    const outcomes = await Promise.all(kinds.map(kind => onePicture(game, kind, options).catch(e => {
+      if (options.signal?.aborted) throw e;
+      return { error: e.message };
+    })));
+    for (const o of outcomes) {
+      for (const k of ['downloaded', 'upgraded', 'existing', 'missing']) result[k] += o[k] || 0;
+      Object.assign(result.media, o.media);
+      if (o.error) result.errors.push(o.error);
+    }
+    // A sharper picture is a new file (often with a new extension): the window must swap its address.
+    if (result.upgraded) result.replace = true;
     return result;
   }
-  const snapshot=()=>job ? structuredClone(job):null;
-  function emit(item,force=false) {
-    if(!force&&!item&&Date.now()-lastEmit<100)return;
-    lastEmit=Date.now();job.seq++;
-    onProgress({...snapshot(),...(item?{item}: {})});
+
+  // ---- the download job shown in the window ----
+  let job = null, controller = null, lastSent = 0;
+  const status = () => (job ? structuredClone(job) : null);
+  function send(item = null, now = false) {
+    if (!now && !item && Date.now() - lastSent < 100) return;
+    lastSent = Date.now();
+    job.seq++;
+    onProgress({ ...status(), ...(item ? { item } : {}) });
   }
-  function start(options={}) {
-    if(job?.status==='running'||job?.status==='cancelling')throw new Error('An artwork download is already running');
-    const types=[...new Set((options.types||[]).filter(t=>Object.hasOwn(TYPES,t)))];
-    if(!types.length)throw new Error('Choose at least one artwork type');
-    const scope=options.scope;
-    if(!['game','system','library'].includes(scope))throw new Error('Choose a download scope');
-    const games=getGames().filter(g=>scope==='library'||(scope==='game'?g.id===options.gameId:g.system===options.systemId));
-    if(!games.length)throw new Error('No games found. Add a ROM folder and rescan your library first.');
-    controller=new AbortController();const signal=controller.signal;
-    job={id:randomUUID(),seq:0,status:'running',scope,types,total:games.length,completed:0,downloaded:0,upgraded:0,existing:0,missing:0,unsupported:0,errors:0,lastTitle:'Preparing download…',entries:[],startedAt:Date.now()};
-    const refreshed=new Set(),failures=new Map();let next=0;
-    emit(null,true);
-    async function worker() {
-      while(!signal.aborted&&next<games.length) {
-        const game=games[next++];job.lastTitle=game.title;emit();
+
+  // scope: 'game' (gameId), 'system' (systemId) or 'library'. types: artwork kinds.
+  // retryMissing: ask again for pictures not found earlier. upgrade: replace blurry covers.
+  function start(options = {}) {
+    if (job?.status === 'running' || job?.status === 'cancelling') throw new Error('An artwork download is already running');
+    const kinds = [...new Set((options.types || []).filter(t => Object.hasOwn(TYPES, t)))];
+    if (!kinds.length) throw new Error('Choose at least one artwork type');
+    const { scope } = options;
+    if (!['game', 'system', 'library'].includes(scope)) throw new Error('Choose a download scope');
+    const games = getGames().filter(g => scope === 'library' || (scope === 'game' ? g.id === options.gameId : g.system === options.systemId));
+    if (!games.length) throw new Error('No games found. Add a game folder first.');
+
+    controller = new AbortController();
+    const { signal } = controller;
+    job = { id: randomUUID(), seq: 0, status: 'running', scope, types: kinds, total: games.length, completed: 0, downloaded: 0, upgraded: 0,
+      existing: 0, missing: 0, unsupported: 0, errors: 0, lastTitle: 'Preparing download…', entries: [], startedAt: Date.now() };
+    const run = { refreshed: new Set(), broken: new Map() };
+    const settings = { signal, run, retryMissing: !!options.retryMissing, upgrade: !!options.upgrade };
+    send(null, true);
+
+    let next = 0;
+    const worker = async () => {
+      while (!signal.aborted && next < games.length) {
+        const game = games[next++];
+        job.lastTitle = game.title;
+        send();
         let result;
-        try {result=await downloadGame(game,types,{signal,retryMissing:!!options.retryMissing,upgrade:!!options.upgrade,refreshed,failures})}
-        catch(e) {if(signal.aborted)return;result={gameId:game.id,title:game.title,media:{},downloaded:0,existing:0,missing:0,errors:[e.message]}}
-        job.completed++;job.downloaded+=result.downloaded;job.upgraded+=result.upgraded||0;job.existing+=result.existing;job.missing+=result.missing;
-        job.unsupported+=result.unsupported?1:0;job.errors+=result.errors.length?1:0;
-        for(const [kind,url] of Object.entries(result.media))if(!game.media[kind]||result.upgraded)game.media[kind]=url;
-        job.entries.unshift({...result});job.entries=job.entries.slice(0,8);
-        emit(Object.keys(result.media).length&&result.downloaded?result:null);
+        try {
+          result = await forGame(game, kinds, settings);
+        } catch (e) {
+          if (signal.aborted) return;
+          result = { gameId: game.id, title: game.title, media: {}, downloaded: 0, existing: 0, missing: 0, errors: [e.message] };
+        }
+        job.completed++;
+        for (const k of ['downloaded', 'upgraded', 'existing', 'missing']) job[k] += result[k] || 0;
+        if (result.unsupported) job.unsupported++;
+        if (result.errors.length) job.errors++;
+        for (const [kind, url] of Object.entries(result.media)) if (!game.media[kind] || result.upgraded) game.media[kind] = url;
+        job.entries = [{ ...result }, ...job.entries].slice(0, 8);
+        send(result.downloaded && Object.keys(result.media).length ? result : null);
       }
-    }
-    Promise.all([worker(),worker()]).then(()=>{
-      job.status=signal.aborted?'cancelled':'complete';job.finishedAt=Date.now();emit(null,true);
-    }).catch(e=>{job.status='failed';job.error=e.message;emit(null,true)});
-    return snapshot();
+    };
+    Promise.all([worker(), worker()])
+      .then(() => { job.status = signal.aborted ? 'cancelled' : 'complete'; job.finishedAt = Date.now(); send(null, true); })
+      .catch(e => { job.status = 'failed'; job.error = e.message; send(null, true); });
+    return status();
   }
-  function cancel() {if(job?.status==='running'){job.status='cancelling';controller.abort();emit(null,true)}return snapshot()}
-  // Lets a source show what it is doing (e.g. preparing the LaunchBox database) in the progress panel.
-  function note(message) {if(job?.status==='running'){job.lastTitle=message;emit(null,true)}}
-  return {start,cancel,status:snapshot,download,note,titleKeys};
+  function cancel() {
+    if (job?.status === 'running') { job.status = 'cancelling'; controller.abort(); send(null, true); }
+    return status();
+  }
+  // Shows what a source is busy with (like preparing the LaunchBox database) as the job's current line.
+  function note(message) {
+    if (job?.status === 'running') { job.lastTitle = message; send(null, true); }
+  }
+
+  return { start, cancel, status, download, note, titleKeys };
 }
-module.exports={createArtworkService,TYPES};
+
+module.exports = { createArtworkService, TYPES };
