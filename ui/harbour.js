@@ -148,14 +148,19 @@ function openUpdates() { UISound.play('open'); renderUpdates(); if (!$('#updates
 function renderUpdates() {
   const list = pendingUpdates();
   $('#updAll').hidden = !list.some(u => u.auto);
-  $('#updAll').textContent = `Update all (${list.filter(u => u.auto).length})`;
+  $('#updAll').textContent = S.updatingAll ? 'Updating all…' : `Update all (${list.filter(u => u.auto).length})`;
+  $('#updAll').disabled = updating;
   $('#updList').replaceChildren(...(list.length ? list.map(u => {
     const row = el('div', 'upd-row');
     const name = el('div', 'upd-name'); name.append(el('b', '', u.name), el('small', '', `${u.kind === 'emu' ? 'Emulator' : 'Game'} · ${u.from || '?'} → ${u.to || '?'}`));
     const btns = el('div', 'emu-btns');
     const b = (text, fn, cls = '') => { const x = el('button', cls, text); x.type = 'button'; x.onclick = fn; btns.append(x); return x; };
-    if (u.auto) b('Update', () => updateOne(u), 'primary');
-    else {
+    if (u.auto) {
+      // While an update runs its button shows the progress, and every update button waits.
+      const key = `${u.kind}:${u.id}`, mine = S.updatingKey === key;
+      const x = b(mine ? S.updProgress || 'Updating…' : 'Update', () => updateOne(u), mine ? 'primary busy' : 'primary');
+      x.dataset.key = key; x.disabled = updating;
+    } else {
       // Harbour can't install this one: say where to update it. It notices by itself once it's done.
       name.append(el('small', 'upd-how', 'Update in app'));
       b('Release page', () => (u.kind === 'emu' ? api.openEmulatorPage(u.id) : api.recompOpenPage(u.id)).catch(e => toast(e.message)));
@@ -167,18 +172,23 @@ function afterUpdates() { refreshBadges(); renderRow(); select(S.sel, true); if 
 async function updateOne(u) {
   if (updating) return toast('An update is already running.');
   updating = true;
-  S.updatingName = u.name; Activity.set('update', `Updating ${u.name}…`);
+  S.updatingName = u.name; S.updatingKey = `${u.kind}:${u.id}`; S.updProgress = '';
+  Activity.set('update', `Updating ${u.name}…`);
+  if ($('#updatesDlg').open) renderUpdates();
   try {
     if (u.kind === 'emu') S.emuStatus[u.id] = await api.emuUpdate(u.id);
     else S.recomp[u.id] = await api.recompUpdate(u.id);
     UISound.play('select'); Activity.done('update', `${u.name} updated to ${u.to}`); return true;
   } catch (e) { UISound.play('error'); Activity.fail('update', `${u.name}: ${e.message}`); return false; }
-  finally { updating = false; afterUpdates(); }
+  finally { updating = false; S.updatingKey = null; afterUpdates(); }
 }
 $('#updAll').onclick = async () => {
+  if (updating) return;
   const autos = pendingUpdates().filter(u => u.auto);
   let ok = 0;
-  for (const u of autos) if (await updateOne(u)) ok++; // one at a time: each downloads, checks and backs up on its own
+  S.updatingAll = true;
+  try { for (const u of autos) if (await updateOne(u)) ok++; } // one at a time: each downloads, checks and backs up on its own
+  finally { S.updatingAll = false; if ($('#updatesDlg').open) renderUpdates(); }
   if (autos.length > 1) toast(`${ok} of ${autos.length} updates installed.`, 6000);
 };
 $('#updClose').onclick = () => { UISound.play('back'); $('#updatesDlg').close(); };
@@ -876,7 +886,14 @@ async function init() {
     showGame(S.list[S.sel]);
   });
   // The finished tick comes from updateOne()/update(), which know the new version.
-  api.onRecompProgress?.(p => { if (!p.done) Activity.set('update', `${S.updatingName ? S.updatingName + ': ' : ''}${p.stage}${p.pct && p.pct < 1 ? ` ${Math.round(p.pct * 100)}%` : ''}`, p.pct); });
+  api.onRecompProgress?.(p => {
+    if (p.done) return;
+    Activity.set('update', `${S.updatingName ? S.updatingName + ': ' : ''}${p.stage}${p.pct && p.pct < 1 ? ` ${Math.round(p.pct * 100)}%` : ''}`, p.pct);
+    // The running update's button in the Updates window shows how far it is.
+    S.updProgress = p.pct && p.pct < 1 ? `${Math.round(p.pct * 100)}%` : /install/i.test(p.stage) ? 'Installing…' : 'Updating…';
+    const btn = S.updatingKey && document.querySelector(`#updList button[data-key="${S.updatingKey}"]`);
+    if (btn) btn.textContent = S.updProgress;
+  });
   setFrozen();
 }
 init().catch(e => toast('Harbour failed to start: ' + e.message, 10000));
