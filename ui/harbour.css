@@ -125,6 +125,7 @@ body.ambient #hero { bottom: 0; }
 .item .card { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; padding: calc(14 * var(--u)); text-align: center;
   font-weight: 700; font-size: calc(17 * var(--u)); line-height: 1.2; background: linear-gradient(160deg, var(--c, #2a4a6a), #0b1522); }
 .item .card small { display: block; margin-top: calc(8 * var(--u)); font-weight: 400; color: var(--muted); font-size: .8em; }
+.item .badge { position: absolute; top: calc(6 * var(--u)); right: calc(6 * var(--u)); background: var(--beam); color: #2a1702; font-size: calc(12 * var(--u)); font-weight: 800; padding: calc(2 * var(--u)) calc(7 * var(--u)); border-radius: 999px; }
 .item .fav { position: absolute; bottom: calc(6 * var(--u)); left: calc(8 * var(--u)); color: #ffd166; font-size: calc(16 * var(--u)); text-shadow: 0 1px 4px #000; }
 #empty { position: absolute; left: calc(64 * var(--u)); top: 40%; color: var(--muted); font-size: calc(22 * var(--u)); }
 
@@ -204,10 +205,6 @@ dialog :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .emu-badge { position: absolute; right: calc(6 * var(--u)); bottom: calc(6 * var(--u)); width: calc(26 * var(--u)); height: calc(26 * var(--u));
   display: grid; place-items: center; border-radius: 50%; background: rgba(6,11,20,.82); box-shadow: 0 0 0 1.5px var(--c), 0 2px 8px rgba(0,0,0,.5); }
 .emu-badge svg { width: 68%; height: 68%; }
-.port-dot { --c: var(--accent); position: absolute; right: calc(9 * var(--u)); bottom: calc(9 * var(--u)); width: calc(13 * var(--u)); height: calc(13 * var(--u));
-  border-radius: 50%; background: var(--c); box-shadow: 0 0 0 calc(3 * var(--u)) rgba(6,11,20,.82), 0 2px 8px rgba(0,0,0,.5); }
-.port-dot.missing { --c: #7d8896; }
-.port-dot.update { --c: var(--beam); }
 .emu-chip { display: inline-flex; align-items: center; gap: .35em; font-weight: 600; }
 .emu-chip svg { width: 1.15em; height: 1.15em; }
 .emu-update { display: grid; gap: 2px; }
