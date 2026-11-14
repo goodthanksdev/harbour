@@ -13,3 +13,6 @@ Desktop.ini
 .DS_Store
 .vscode/
 *.log
+
+# Release builds (npm run release:build)
+dist/

@@ -31,18 +31,14 @@ recomp.
 
 ## Getting started
 
-Harbour runs on Windows 10 and 11. You need [Node.js](https://nodejs.org/) to install it.
+Harbour runs on Windows 10 and 11.
 
-```
-git clone https://github.com/goodthanksdev/harbour
-cd harbour
-npm install
-npm start
-```
+**Download** the latest `Harbour-<version>-win64.zip` from [Releases](https://github.com/goodthanksdev/harbour/releases),
+unzip it anywhere and run `Harbour.exe`. Harbour keeps itself up to date like everything else in it. To start it from
+Steam, add `Harbour.exe` as a non-Steam game (`Harbour.ico` is next to it).
 
-`npm start` runs Harbour from the folder. To start it without a terminal (or from Steam), point a shortcut at
-`node_modules\electron\dist\electron.exe` with the Harbour folder as its argument; `ui\assets\brand\harbour.ico` is the
-icon.
+**From source** (needs [Node.js](https://nodejs.org/)): `git clone`, then `npm install` and `npm start`.
+`npm run release:build` makes the release zip in `dist\`.
 
 Then, in Harbour:
 
@@ -51,7 +47,7 @@ Then, in Harbour:
    have, and the game's name and console; check them and press Add.
 3. Artwork and clips arrive by themselves. Settings also has buttons to fetch them for everything.
 
-Everything Harbour keeps (settings, artwork, clips, logs) lives in `data\` inside its folder.
+Everything Harbour keeps (settings, artwork, clips, logs) lives in `data\` next to it, so updates never touch it.
 
 ## Controls
 

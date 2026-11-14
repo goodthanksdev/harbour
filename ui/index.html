@@ -46,6 +46,18 @@
 
   <div id="menu" class="popover" hidden role="menu"></div>
 
+  <!-- First start, when there's nothing to show yet -->
+  <dialog id="welcomeDlg">
+    <img class="welcome-mark" src="assets/brand/harbour-mark.svg" alt="" />
+    <h2>Welcome to Harbour</h2>
+    <p class="note">Point Harbour at your games folder: it finds the console folders inside (N64, PS2, Switch…) and their games, then gets artwork and gameplay clips by itself.</p>
+    <div class="choices">
+      <button type="button" class="choice" id="welcomeFolder"><b>Pick your games folder</b><span>Games for emulators, sorted by console.</span></button>
+      <button type="button" class="choice" id="welcomePort"><b>Add a PC port / recomp</b><span>Pick its folder. Harbour works out the rest.</span></button>
+    </div>
+    <div class="dlg-actions"><button type="button" id="welcomeLater">Later</button></div>
+  </dialog>
+
   <dialog id="settings">
     <h2>Settings</h2>
     <div class="set-row"><span>Emulators &amp; game folders</span><button id="setEmus">Manage</button></div>

@@ -6,7 +6,8 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "brand:build": "electron scripts/build-harbour-brand.cjs"
+    "brand:build": "electron scripts/build-harbour-brand.cjs",
+    "release:build": "node scripts/build-release.cjs"
   },
   "devDependencies": {
     "electron": "^39.0.0"
@@ -14,5 +15,9 @@
   "author": {
     "name": "goodthanksdev"
   },
-  "productName": "Harbour"
+  "productName": "Harbour",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/goodthanksdev/harbour.git"
+  }
 }

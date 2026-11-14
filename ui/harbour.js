@@ -142,7 +142,8 @@ function pendingUpdates() {
   const emus = Object.entries(S.emuStatus || {}).filter(([, s]) => s.updateAvailable)
     .map(([id, s]) => ({ kind: 'emu', id, s, name: (S.emus || []).find(e => e.id === id)?.name || id, from: s.installed, to: s.latest?.tag, auto: !!s.canInstall }));
   // Ones Harbour can install first, "update in app" ones last (sort keeps the order within each group).
-  return [...games, ...emus].sort((a, b) => Number(b.auto) - Number(a.auto));
+  const self = S.self?.updateAvailable ? [{ kind: 'harbour', id: 'harbour', name: 'Harbour', from: S.self.current, to: S.self.latest?.tag, auto: true }] : [];
+  return [...self, ...games, ...emus].sort((a, b) => Number(b.auto) - Number(a.auto));
 }
 function openUpdates() { UISound.play('open'); renderUpdates(); if (!$('#updatesDlg').open) $('#updatesDlg').showModal(); }
 function renderUpdates() {
@@ -176,6 +177,7 @@ async function updateOne(u) {
   Activity.set('update', `Updating ${u.name}…`);
   if ($('#updatesDlg').open) renderUpdates();
   try {
+    if (u.kind === 'harbour') { await api.selfUpdate(); Activity.set('update', 'Harbour updated: restarting…'); return true; }  // restarts itself
     if (u.kind === 'emu') S.emuStatus[u.id] = await api.emuUpdate(u.id);
     else S.recomp[u.id] = await api.recompUpdate(u.id);
     UISound.play('select'); Activity.done('update', `${u.name} updated to ${u.to}`); return true;
@@ -316,8 +318,9 @@ async function update(g = S.list[S.sel]) {
 async function checkUpdates(force = false) {
   if (force) Activity.set('check', 'Checking for updates…');
   try { Object.assign(S.recomp, await api.recompCheckAll(force)); } catch (e) { if (force) Activity.fail('check', `Update check failed: ${e.message}`); return; }
+  S.self = await api.selfStatus(force).catch(() => S.self);  // Harbour itself (only in a release)
   refreshBadges(); showGame(S.list[S.sel]);
-  if (force) { const n = Object.values(S.recomp).filter(x => x.updateAvailable).length; Activity.done('check', n ? `${n} update${n === 1 ? '' : 's'} available` : 'Everything is up to date'); }
+  if (force) { const n = pendingUpdates().length; Activity.done('check', n ? `${n} update${n === 1 ? '' : 's'} available` : 'Everything is up to date'); }
 }
 
 // ---------- ••• menu ----------
@@ -874,7 +877,9 @@ async function init() {
   // Rescan behind the cached library; redraw only if something changed.
   api.scan(false, { onlyIfChanged: true }).then(fresh => { if (fresh) { const id = S.list[S.sel]?.id; S.games = fresh; buildTabs(); setTab(S.tab, true); const i = S.list.findIndex(g => g.id === id); if (i >= 0) select(i, true); } })
     .catch(() => {}).then(autoMedia);
-  if (S.games.some(g => g.recomp)) checkUpdates(false);
+  checkUpdates(false);
+  // Nothing to show yet: say hello and offer the two ways in.
+  if (!S.games.length) { UISound.play('open'); $('#welcomeDlg').showModal(); }
   // Emulator badges: draw them once the emulators' update checks are in.
   loadEmulators().then(() => { const id = S.list[S.sel]?.id; renderRow(); const i = S.list.findIndex(g => g.id === id); select(i >= 0 ? i : 0, true); });
   if (S.games.length && !S.games.some(g => g.media?.fanart || g.media?.front)) toast('No artwork yet: open Settings (Start) → Download covers, backgrounds and logos.', 8000);
@@ -896,3 +901,8 @@ async function init() {
   setFrozen();
 }
 init().catch(e => toast('Harbour failed to start: ' + e.message, 10000));
+
+// ---------- first start ----------
+$('#welcomeFolder').onclick = async () => { UISound.play('select'); $('#welcomeDlg').close(); await addGameFolder(''); };
+$('#welcomePort').onclick = async () => { UISound.play('select'); $('#welcomeDlg').close(); await pickPort(); };
+$('#welcomeLater').onclick = () => { UISound.play('back'); $('#welcomeDlg').close(); };

@@ -20,9 +20,11 @@ const { createLaunchBox } = require('./launchbox');
 const { createVideoService } = require('./videos');
 
 const ROOT = __dirname;
-const APP_VERSION = require('./package.json').version;
-// Settings, artwork, videos and logs live in ./data next to Harbour.
-const DATA = path.join(ROOT, 'data');
+const PACKAGE = require('./package.json');
+const APP_VERSION = PACKAGE.version;
+// Settings, artwork, videos and logs live in data\: next to Harbour.exe in a release (so an update, which replaces
+// Harbour's own files, never touches them), or in the source folder when run from there.
+const DATA = app.isPackaged ? path.join(path.dirname(process.execPath), 'data') : path.join(ROOT, 'data');
 const LOG_PATH = path.join(DATA, 'logs', 'harbour.log');
 function log(...parts) {
   try {
@@ -1806,6 +1808,53 @@ handle('harbour:emuUpdate', async id => {
     fsp.rm(tmp, { recursive: true, force: true }).catch(() => {});
   }
 });
+
+// ---------- Harbour's own updates ----------
+// A release of Harbour is a zip: Harbour.exe and the Electron runtime, with Harbour's own files in resources\app.
+// An update replaces resources\app (your data\ is outside it) and restarts. A release built on a different Electron
+// can't be swapped in while Harbour runs, so that one is "update in app": its release page.
+const SELF_REPO = String(PACKAGE.repository?.url || PACKAGE.repository || '').replace(/^github:|^https:\/\/github\.com\/|\.git$/g, '');
+let selfCheck = null;  // { at, latest }
+async function harbourStatus(force = false) {
+  if (!app.isPackaged || !SELF_REPO) return { packaged: app.isPackaged, current: APP_VERSION, updateAvailable: false };
+  if (force || !selfCheck || Date.now() - selfCheck.at > RECOMP_CHECK_MS) {
+    try { selfCheck = { at: Date.now(), latest: await findRelease(SELF_REPO, { asset: 'win64\\.zip$', prerelease: false }) }; }
+    catch (e) { return { packaged: true, current: APP_VERSION, updateAvailable: false, error: e.message }; }
+  }
+  const latest = selfCheck.latest;
+  const tag = String(latest.tag || '').replace(/^v/, '');
+  const newer = tag.localeCompare(APP_VERSION, undefined, { numeric: true }) > 0;
+  return { packaged: true, current: APP_VERSION, updateAvailable: newer, latest: { tag: latest.tag, page: latest.page, notes: latest.notes } };
+}
+handle('harbour:selfStatus', force => harbourStatus(!!force));
+handle('harbour:selfUpdate', async () => {
+  const st = await harbourStatus(true);
+  if (!st.updateAvailable) return st;
+  const rel = selfCheck.latest;
+  const send = p => win?.webContents.send('recomp:progress', { gameId: 'harbour', ...p });
+  const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'harbour-self-'));
+  try {
+    const { archive, scan } = await fetchRelease(rel, tmp, send);
+    const src = await unpackRelease(rel, archive, tmp, send);
+    const appSrc = path.join(src, 'resources', 'app');
+    if (!fs.existsSync(path.join(appSrc, 'main.js'))) throw new Error('That release doesn\'t look like Harbour.');
+    const runtime = (() => { try { return fs.readFileSync(path.join(src, 'electron-version.txt'), 'utf8').trim(); } catch { return ''; } })();
+    if (runtime && runtime !== process.versions.electron) {
+      await shell.openExternal(rel.page);
+      throw new NotReadyToRun('This Harbour update needs a fresh download: update in app (its release page is open).');
+    }
+    send({ stage: 'Installing…', pct: 1 });
+    const backup = path.join(DATA, '_harbour-backup', 'harbour-' + APP_VERSION);
+    await copyUpdate(appSrc, ROOT, backup, []);
+    log(`harbour updated ${APP_VERSION} -> ${rel.tag} (defender: ${scan})`);
+    send({ stage: 'Restarting…', pct: 1, done: true });
+    setTimeout(() => { app.relaunch(); app.exit(0); }, 800);
+    return { ...st, installed: rel.tag };
+  } finally {
+    fsp.rm(tmp, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
 handle('harbour:openEmulatorPage', async id => {
   const e = config.customEmulators.find(x => x.id === id);
   const page = recompChecks.get('emu:' + id)?.latest?.page || (e?.source && (e.source.type === 'github' ? `https://github.com/${e.source.repo}/releases` : `https://${e.source.host}/${e.source.repo}/releases`));
