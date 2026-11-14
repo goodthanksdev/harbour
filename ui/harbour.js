@@ -154,14 +154,9 @@ function renderUpdates() {
     const b = (text, fn, cls = '') => { const x = el('button', cls, text); x.type = 'button'; x.onclick = fn; btns.append(x); return x; };
     if (u.auto) b('Update', () => updateOne(u), 'primary');
     else {
+      // Harbour can't install this one: say where to update it. It notices by itself once it's done.
+      name.append(el('small', 'upd-how', u.kind === 'emu' ? `Update it in ${u.name} or from its release page` : 'Update it with its own updater or from its release page'));
       b('Release page', () => (u.kind === 'emu' ? api.openEmulatorPage(u.id) : api.recompOpenPage(u.id)).catch(e => toast(e.message)));
-      b("I've updated it", async () => {
-        try {
-          if (u.kind === 'emu') S.emuStatus[u.id] = await api.markEmulatorCurrent(u.id);
-          else S.recomp[u.id] = await api.recompMarkCurrent(u.id);
-          UISound.play('select'); afterUpdates();
-        } catch (e) { toast(e.message); }
-      });
     }
     row.append(name, btns); return row;
   }) : [el('p', 'note', 'Everything is up to date.')]));
@@ -291,7 +286,7 @@ let updating = false;
 async function update(g = S.list[S.sel]) {
   const st = g && S.recomp[g.id];
   if (!st?.updateAvailable) return;
-  if (!st.auto) { api.recompOpenPage(g.id).then(() => toast("Release page opened. After updating, choose \"I've updated it\" in •••.", 6000)).catch(e => toast(e.message)); return; }
+  if (!st.auto) { api.recompOpenPage(g.id).then(() => toast('Release page opened. Harbour notices once you\'ve updated.', 6000)).catch(e => toast(e.message)); return; }
   if (updating) return toast('An update is already running.');
   updating = true;
   S.updatingName = g.title; Activity.set('update', `Updating ${g.title}…`);
@@ -318,7 +313,6 @@ function openMenu(anchor) {
   if (g.recomp) {
     add('Platform & updates…', () => openRecompDialog(g));
     add('Check for update', async () => { S.recomp[g.id] = await api.recompCheck(g.id, true).catch(e => ({ error: e.message })); refreshBadges(); showGame(g); const s = S.recomp[g.id]; toast(s.error || (s.updateAvailable ? `${s.latest.tag} is out.` : s.updateAvailable === false ? 'Up to date.' : `Newest is ${s.latest?.tag || '?'}. Set your version in Platform & updates.`)); });
-    if (S.recomp[g.id]?.updateAvailable) add("I've updated it myself", async () => { S.recomp[g.id] = await api.recompMarkCurrent(g.id); refreshBadges(); showGame(g); });
     if (S.recomp[g.id]?.repo) add('Open release page', () => api.recompOpenPage(g.id).catch(e => toast(e.message)));
     add('Choose game .exe…', () => api.chooseGameExecutable(g.id).then(r => r && toast('Saved.')).catch(e => toast(e.message)));
   }
@@ -488,13 +482,12 @@ async function renderEmulators() {
     const where = st.source ? (st.source.type === 'github' ? st.source.repo : `${st.source.host}/${st.source.repo}`) : null;
     const line = !where ? 'Updates: no source set, so Harbour can\'t tell when there\'s a new version.'
       : `Updates from ${where} · you have ${st.installed || '?'} · newest ${st.latest?.tag || '?'}` + (st.error ? ' (couldn\'t check)' : '');
-    const upd = el('div', 'emu-update'); upd.append(emuBadge(info, 'emu-chip', st.updateAvailable ? `${st.latest.tag} available` : !e.exe ? 'Program missing' : where && st.installed ? 'Up to date' : 'Version unknown'), el('small', '', line));
+    const upd = el('div', 'emu-update'); upd.append(emuBadge(info, 'emu-chip', st.updateAvailable ? `${st.latest.tag} available: update it in ${e.name}` : !e.exe ? 'Program missing' : where && st.installed ? 'Up to date' : 'Version unknown'), el('small', '', line));
     const btns = el('div', 'emu-btns');
     const b = (text, fn, cls = '') => { const x = el('button', cls, text); x.type = 'button'; x.onclick = fn; btns.append(x); };
     if (e.custom) b('Consoles…', () => editEmuConsoles(e, card));
     b('Updates…', () => editEmuSource(e, st, card));
     if (where) b('Release page', () => api.openEmulatorPage(e.id).catch(err => toast(err.message)));
-    if (st.updateAvailable) b("I've updated it", async () => { try { S.emuStatus[e.id] = await api.markEmulatorCurrent(e.id); UISound.play('select'); renderEmulators(); } catch (err) { toast(err.message); } });
     b('Change program…', async () => { const r = await api.emuPickExe(e.id).catch(err => toast(err.message)); if (r) { toast(`${e.name} now uses ${r.exe.split(/[\\/]/).pop()}.`); renderEmulators(); } });
     b('Open folder', () => api.emuOpenFolder(e.id).catch(err => toast(err.message)));
     if (e.custom) b('Remove', async () => {
@@ -781,7 +774,16 @@ function setFrozen() {
   else { S.lastInput = Date.now(); startVideoSoon(S.list[S.sel]); }
   setPolling();
 }
-addEventListener('focus', () => { S.focused = true; setFrozen(); });
+addEventListener('focus', () => { S.focused = true; setFrozen(); noticeOwnUpdates(); });
+// Coming back to Harbour (e.g. after updating an emulator yourself): look again, without asking the internet.
+async function noticeOwnUpdates() {
+  if (!pendingUpdates().length) return;
+  const before = pendingUpdates().length;
+  await loadEmulators(false);
+  if (S.games.some(g => g.recomp)) try { Object.assign(S.recomp, await api.recompCheckAll(false)); } catch {}
+  const after = pendingUpdates().length;
+  if (after !== before) { afterUpdates(); Activity.done('noticed', after < before ? 'Update noticed: you\'re on the newest version' : 'Updates changed'); }
+}
 addEventListener('blur', () => { S.focused = false; setFrozen(); });
 document.addEventListener('visibilitychange', setFrozen);
 api.onGameStarted(() => { S.running = true; setFrozen(); });

@@ -834,7 +834,24 @@ function saveRecompChecks() {
   recompSaveTimer = setTimeout(() => { try { fs.writeFileSync(RECOMP_CHECKS_PATH, JSON.stringify(Object.fromEntries(recompChecks))); } catch {} }, 500);
 }
 const RECOMP_CHECK_MS = 3 * 3600 * 1000;
+// Updates you do yourself (an emulator's own updater, a download from the release page) are noticed
+// by the program file: Harbour remembers its size and date while your version is current, and once a
+// newer release is out, a changed program file (or one dated after that release) means you have it.
+function fileStamp(file) { try { const s = fs.statSync(file); return { id: `${s.size}:${Math.round(s.mtimeMs)}`, mtime: s.mtimeMs }; } catch { return null; } }
+function noticeUpdate(holder, file, latest, outdated, current, name) {
+  const inst = holder.installed, stamp = file && fileStamp(file);
+  if (!inst || !stamp || !latest) return;
+  if (!outdated(inst)) { if (inst.stamp !== stamp.id) { inst.stamp = stamp.id; saveConfig(config); } return; }
+  // Needs the exact release time: a day-only date would count a file from earlier that day as newer.
+  const released = Date.parse(latest.published || latest.publishedAt || '') || Infinity;
+  if ((inst.stamp && inst.stamp !== stamp.id) || stamp.mtime > released) {
+    holder.installed = { ...current(), stamp: stamp.id }; saveConfig(config);
+    log(`noticed ${name} was updated to ${latest.tag}`);
+  } else if (!inst.stamp) { inst.stamp = stamp.id; saveConfig(config); }
+}
 function recompStatus(entry, latest) {
+  noticeUpdate(entry, entry.executable, latest, i => i.assetId ? i.assetId !== latest.assetId : i.tag !== latest.tag,
+    () => ({ tag: latest.tag, assetId: latest.assetId, date: latest.publishedAt }), entry.title);
   const inst = entry.installed || null;
   const updateAvailable = !latest ? null : inst?.assetId ? inst.assetId !== latest.assetId : inst?.tag ? inst.tag !== latest.tag : null;
   return {
@@ -1350,7 +1367,7 @@ handle('harbour:removeGameFolder', ({ system, folder }) => {
 // ---------- Emulator updates ----------
 // An emulator can have an update source: a GitHub repository ("owner/name") or one on another
 // Forgejo/Gitea site ("git.eden-emu.dev/eden-emu/eden"). Harbour only tells you about new versions;
-// emulators update with their own updater or by hand, then "I've updated it" records the version.
+// emulators update with their own updater or by hand, and Harbour notices (see noticeUpdate).
 function parseSource(input) {
   const text = String(input || '').trim().replace(/^https?:\/\//i, '').replace(/\.git$/i, '').replace(/\/+$/, '');
   if (!text) return null;
@@ -1369,7 +1386,7 @@ async function latestEmulatorRelease(source, prerelease) {
     if (!prerelease) {
       try {
         const rel = await ghJson(`https://api.github.com/repos/${source.repo}/releases/latest`);
-        return { tag: rel.tag_name, date: (rel.published_at || '').slice(0, 10), page: rel.html_url || page };
+        return { tag: rel.tag_name, date: (rel.published_at || '').slice(0, 10), published: rel.published_at || null, page: rel.html_url || page };
       } catch (e) { if (!/GitHub 404/.test(e.message)) throw e; } // only test builds published: fall through
     }
     list = await ghJson(`https://api.github.com/repos/${source.repo}/releases?per_page=10`);
@@ -1381,9 +1398,10 @@ async function latestEmulatorRelease(source, prerelease) {
   }
   const rel = list.find(x => !x.draft && (prerelease || !x.prerelease)) || list.find(x => !x.draft);
   if (!rel) throw new Error(`${source.repo} has no releases.`);
-  return { tag: rel.tag_name, date: (rel.published_at || '').slice(0, 10), page: rel.html_url || page };
+  return { tag: rel.tag_name, date: (rel.published_at || '').slice(0, 10), published: rel.published_at || null, page: rel.html_url || page };
 }
 function emulatorUpdateStatus(e, latest, error) {
+  noticeUpdate(e, resolveExe(e.id), latest, i => i.tag !== latest.tag, () => ({ tag: latest.tag }), e.name);
   const installed = e.installed?.tag || null;
   return { id: e.id, source: e.source || null, installed, latest: latest || null, error: error || null,
     updateAvailable: latest && installed ? latest.tag !== installed : null };
@@ -1415,14 +1433,6 @@ handle('harbour:checkEmulators', async force => {
   const out = {};
   await mapLimit(config.customEmulators, 4, async e => { out[e.id] = await checkEmulator(e.id, !!force); });
   return out;
-});
-handle('harbour:markEmulatorCurrent', id => {
-  const e = config.customEmulators.find(x => x.id === id);
-  const hit = recompChecks.get('emu:' + id);
-  if (!e || !hit?.latest) throw new Error('Check for an update first.');
-  e.installed = { tag: hit.latest.tag };
-  saveConfig(config);
-  return emulatorUpdateStatus(e, hit.latest);
 });
 handle('harbour:openEmulatorPage', async id => {
   const e = config.customEmulators.find(x => x.id === id);
@@ -1500,14 +1510,6 @@ handle('recomp:checkAll', async force => {
   const out = {};
   await mapLimit(ids, 4, async id => { out[id] = await checkRecomp(id, !!force); });
   return out;
-});
-handle('recomp:markCurrent', gameId => {
-  const { entry } = recompEntry(gameId);
-  const hit = recompChecks.get(gameId);
-  if (!hit?.latest) throw new Error('Check for an update first.');
-  entry.installed = { tag: hit.latest.tag, assetId: hit.latest.assetId, date: hit.latest.publishedAt };
-  saveConfig(config);
-  return recompStatus(entry, hit.latest);
 });
 handle('recomp:update', gameId => updateRecomp(gameId, p => win.webContents.send('recomp:progress', p)));
 handle('recomp:openPage', async gameId => {
