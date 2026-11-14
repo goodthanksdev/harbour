@@ -170,7 +170,6 @@ body.frozen *, body.frozen *::before, body.frozen *::after { animation-play-stat
 .emu-console { display: grid; grid-template-columns: 1fr minmax(0, 58%); align-items: center; gap: 16px; }
 .emu-console small { color: var(--dim); }
 .emu-console select { width: 100%; }
-.emu-console select.quiet { color: var(--dim); }
 .emu-cards { display: grid; gap: calc(10 * var(--u)); }
 .emu-card { border: 1px solid var(--line); border-radius: calc(12 * var(--u)); padding: calc(14 * var(--u)) calc(16 * var(--u)); display: grid; gap: calc(10 * var(--u)); background: rgba(255,255,255,.03); }
 .emu-head { display: grid; gap: 2px; }

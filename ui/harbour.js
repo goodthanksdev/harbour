@@ -461,16 +461,14 @@ async function renderEmulators() {
     const row = el('div', 'emu-console');
     const label = el('span', '', s.name); if (counts[s.id]) label.append(el('small', '', ` · ${counts[s.id]} game${counts[s.id] === 1 ? '' : 's'}`));
     const pick = el('select');
-    const fits = mine.filter(e => (e.systems || []).includes(s.id)), others = mine.filter(e => !fits.includes(e));
-    pick.append(option('', s.direct ? 'Runs by itself' : 'None'), ...fits.map(e => option(e.id, e.name)), ...others.map(e => option(e.id, `${e.name} (not set up for ${shortName(s.name)})`)));
-    pick.value = mine.some(e => e.id === s.emulator) ? s.emulator : '';
+    // Only emulators that play this console (plus the current choice, so it never silently disappears).
+    const fits = mine.filter(e => (e.systems || []).includes(s.id) || e.id === s.emulator);
+    pick.append(option('', s.direct ? 'Runs by itself' : 'None'), ...fits.map(e => option(e.id, e.name)));
+    pick.value = fits.some(e => e.id === s.emulator) ? s.emulator : '';
     pick.onchange = async () => {
-      try { await api.setSystemEmulator({ system: s.id, emulator: pick.value }); UISound.play('select'); toast(`${shortName(s.name)} games now start with ${pick.selectedOptions[0].textContent.replace(/ \(not set up.*$/, '')}.`); }
+      try { await api.setSystemEmulator({ system: s.id, emulator: pick.value }); UISound.play('select'); toast(`${shortName(s.name)} games now start with ${pick.selectedOptions[0].textContent}.`); }
       catch (e) { UISound.play('error'); toast(e.message); }
     };
-    // Recomps run themselves, so a console whose games are all PC ports doesn't need an emulator.
-    const recomps = S.games.filter(g => g.system === s.id && g.recomp).length;
-    if (recomps && recomps === counts[s.id] && !pick.value) { pick.options[0].textContent = 'Not needed (PC ports run by themselves)'; pick.classList.add('quiet'); }
     row.append(label, pick); return row;
   });
   $('#emuConsoles').replaceChildren(...(rows.length ? rows : [el('p', 'note', 'No consoles yet.')]));
