@@ -41,7 +41,13 @@ body.ambient #hero { bottom: 0; }
 #top { position: fixed; top: 0; left: 0; right: 0; display: flex; align-items: center; gap: calc(28 * var(--u)); padding: calc(26 * var(--u)) calc(56 * var(--u)); }
 .brand { display: flex; align-items: center; gap: calc(10 * var(--u)); font-size: calc(24 * var(--u)); letter-spacing: .22em; font-weight: 300; white-space: nowrap; }
 .brand img { height: calc(38 * var(--u)); }
-.brand b { font-weight: 800; color: var(--accent); }
+/* Wordmark: white letters with a teal reflection in the water below, broken into a few soft ripples. */
+.brand .word { position: relative; font-weight: 700; letter-spacing: .24em; color: #fff; }
+.brand .word::after { content: attr(data-text); position: absolute; left: 0; top: 100%; margin-top: -.18em; pointer-events: none;
+  transform: scaleY(-.8) skewX(-10deg); transform-origin: center;
+  background: repeating-linear-gradient(to bottom, var(--accent) 0 .2em, transparent .2em .27em);
+  -webkit-background-clip: text; background-clip: text; color: transparent; opacity: .8;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 10%, #000 100%); }
 /* Console tabs: the selected one sits in the middle of the screen, the rest slide along and fade out at the edges. */
 #tabsView { position: absolute; left: 22%; right: 22%; top: 0; bottom: 0; overflow: hidden; pointer-events: none;
   -webkit-mask-image: linear-gradient(to right, transparent, #000 14%, #000 86%, transparent); }
