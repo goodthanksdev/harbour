@@ -40,7 +40,8 @@ body.ambient #hero { bottom: 0; }
 .chrome { position: relative; z-index: 2; transition: opacity 1.2s ease; }
 #top { position: fixed; top: 0; left: 0; right: 0; display: flex; align-items: center; gap: calc(28 * var(--u)); padding: calc(26 * var(--u)) calc(56 * var(--u)); }
 .brand { display: flex; align-items: center; gap: calc(10 * var(--u)); font-size: calc(24 * var(--u)); letter-spacing: .22em; font-weight: 300; white-space: nowrap; }
-.brand img { height: calc(38 * var(--u)); }
+/* The mark is centred on the letters plus their reflection, not on the text box: 0.31em lower. */
+.brand img { height: calc(38 * var(--u)); transform: translateY(.31em); }
 /* Wordmark: white letters with a teal reflection in the water below, broken into a few soft ripples. */
 .brand .word { position: relative; font-weight: 700; letter-spacing: .24em; color: #fff; }
 /* The copy sits on the word and is flipped and slanted about the letters' baseline (1.06em down in Segoe UI), so each
