@@ -132,7 +132,9 @@ function createVideoService({ dataDir, ghJson, download, extract, sha256File, de
     const fits = v => v?.id && v.duration >= 8 * 60 && matches(g.title, v.title, system) && !otherConsole(v.title, g.system, g.title) &&
       !others.some(o => matches(o.title, v.title, getSystemName(o.system))) &&
       // No trailers, reviews or talking: "no commentary" is fine, any other mention of commentary isn't.
-      !/trailer|review|top \d+|reaction|explained|speedrun|tier list|commentary|let'?s play/i.test(v.title.replace(/(no|without)[- ]commentary|commentary[- ]free/ig, ''));
+      !/trailer|review|top \d+|reaction|explained|speedrun|tier list|commentary|let'?s play/i.test(v.title.replace(/(no|without)[- ]commentary|commentary[- ]free/ig, '')) &&
+      // Cutscene compilations ("The Movie", "All Cutscenes") show no play, unless they say they're a playthrough.
+      !(/cut-?scenes?|\bthe movie\b|cinematics/i.test(v.title) && !/playthrough|walkthrough|longplay|gameplay/i.test(v.title));
     const seen = new Set(), candidates = [];
     for (const query of queries) {
       let list = [];

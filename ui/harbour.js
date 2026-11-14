@@ -41,9 +41,10 @@ function buildTabs() {
   const counts = {};
   for (const g of S.games.filter(visible)) counts[g.system] = (counts[g.system] || 0) + 1;
   const fav = S.games.filter(g => g.favorite && visible(g)).length;
-  S.tabs = [{ id: 'all', name: 'All', n: S.games.filter(visible).length },
-    ...(fav ? [{ id: 'favorites', name: '★ Favourites', n: fav }] : []),
-    ...S.config.systems.filter(s => counts[s.id]).sort(byRelease).map(s => ({ id: s.id, name: shortName(s.name), n: counts[s.id] }))];
+  // Favourites first, the consoles in release order, everything ("All") last.
+  S.tabs = [...(fav ? [{ id: 'favorites', name: '★ Favourites', n: fav }] : []),
+    ...S.config.systems.filter(s => counts[s.id]).sort(byRelease).map(s => ({ id: s.id, name: shortName(s.name), n: counts[s.id] })),
+    { id: 'all', name: 'All', n: S.games.filter(visible).length }];
   if (!S.tabs.some(t => t.id === S.tab)) S.tab = 'all';
   const nav = $('#tabs'); nav.replaceChildren();
   for (const t of S.tabs) {
@@ -815,6 +816,21 @@ function renderHints() {
   $('#hints').replaceChildren(...h.map(([k, t]) => { const s = el('span'); s.append(el('kbd', '', k), t); return s; }));
 }
 
+// New games (dropped into a game folder, added any way) get artwork, then a gameplay clip, by themselves.
+// A game tried without luck waits a week before the next try, so hopeless ones aren't searched every start.
+const AUTO_RETRY_MS = 7 * 864e5;
+function autoMedia() {
+  let tried = {};
+  try { tried = JSON.parse(localStorage.getItem('harbourAutoTried') || '{}'); } catch {}
+  const now = Date.now();
+  const fresh = S.games.filter(g => !g.demo && (!g.media?.front || !g.media?.video) && !(now - (tried[g.id] || 0) < AUTO_RETRY_MS));
+  if (!fresh.length || S.artBusy || S.videoJob) return;
+  for (const g of fresh) tried[g.id] = now;
+  try { localStorage.setItem('harbourAutoTried', JSON.stringify(tried)); } catch {}
+  const clips = () => { if (fresh.some(g => !S.games.find(x => x.id === g.id)?.media?.video)) downloadVideos('library', '', 'missing'); };
+  if (fresh.some(g => !g.media?.front)) { S.afterArt = clips; downloadArt('library'); } else clips();
+}
+
 // ---------- start ----------
 async function reload() {
   const games = await api.scan(false).catch(e => { toast('Scan failed: ' + e.message); return null; });
@@ -834,7 +850,8 @@ async function init() {
   if (!games) games = await api.scan(false);
   S.games = games || []; buildTabs(); setTab(S.tab);
   // Rescan behind the cached library; redraw only if something changed.
-  api.scan(false, { onlyIfChanged: true }).then(fresh => { if (fresh) { const id = S.list[S.sel]?.id; S.games = fresh; buildTabs(); setTab(S.tab, true); const i = S.list.findIndex(g => g.id === id); if (i >= 0) select(i, true); } }).catch(() => {});
+  api.scan(false, { onlyIfChanged: true }).then(fresh => { if (fresh) { const id = S.list[S.sel]?.id; S.games = fresh; buildTabs(); setTab(S.tab, true); const i = S.list.findIndex(g => g.id === id); if (i >= 0) select(i, true); } })
+    .catch(() => {}).then(autoMedia);
   if (S.games.some(g => g.recomp)) checkUpdates(false);
   // Emulator badges: draw them once the emulators' update checks are in.
   loadEmulators().then(() => { const id = S.list[S.sel]?.id; renderRow(); const i = S.list.findIndex(g => g.id === id); select(i >= 0 ? i : 0, true); });
