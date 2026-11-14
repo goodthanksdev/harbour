@@ -1994,6 +1994,13 @@ handle('art:status', () => artwork.status());
 handle('art:cancel', () => artwork.cancel());
 handle('emu:list', () => config.customEmulators.map(e => emuStatus(e.id)));
 handle('emu:openFolder', id => { const exe = resolveExe(id); if (exe) shell.openPath(path.dirname(exe)); return !!exe; });
+// Start an emulator on its own (no game, not fullscreen), to change its settings.
+handle('emu:open', id => {
+  const exe = resolveExe(id);
+  if (!exe) throw new Error("Can't find that emulator's program.");
+  spawn(exe, [], { cwd: path.dirname(exe), detached: true, stdio: 'ignore' }).unref();
+  return true;
+});
 handle('emu:pickExe', async id => {
   const r = await dialog.showOpenDialog(win, { title: 'Choose emulator program', filters: PROGRAM_FILTERS, properties: ['openFile'], ...PROGRAM_START });
   if (r.canceled) return null;

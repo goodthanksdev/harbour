@@ -37,6 +37,7 @@ contextBridge.exposeInMainWorld('api', {
   // emulators
   emuList: () => call('emu:list'),
   emuOpenFolder: id => call('emu:openFolder', id),
+  emuOpen: id => call('emu:open', id),
   emuPickExe: id => call('emu:pickExe', id),
   emuRemove: id => call('emu:remove', id),
   addEmulator: options => call('harbour:addEmulator', options),

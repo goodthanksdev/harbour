@@ -516,6 +516,7 @@ async function renderEmulators() {
     b('Updates…', () => editEmuSource(e, st, card));
     if (where) b('Release page', () => api.openEmulatorPage(e.id).catch(err => toast(err.message)));
     b('Change program…', async () => { const r = await api.emuPickExe(e.id).catch(err => toast(err.message)); if (r) { toast(`${e.name} now uses ${r.exe.split(/[\\/]/).pop()}.`); renderEmulators(); } });
+    if (e.exe) b('Open (settings)', () => api.emuOpen(e.id).catch(err => toast(err.message)));
     b('Open folder', () => api.emuOpenFolder(e.id).catch(err => toast(err.message)));
     if (e.custom) b('Remove', async () => {
       if (!confirm(`Remove ${e.name} from Harbour? Its files stay where they are; consoles that used it will have no emulator.`)) return;
