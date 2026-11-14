@@ -1081,6 +1081,36 @@ async function updateRecomp(gameId, sendRaw) {
 }
 
 // ---------- Launching ----------
+// While Steam runs it owns a Steam Controller and hands games a virtual gamepad instead. SDL's own Steam Controller
+// driver (used by many emulators) would read the raw device and get nothing, so programs Harbour starts are told to
+// leave it to Steam then. Without Steam running, the emulator may read the controller directly.
+function launchEnv() {
+  return isRunning('steam.exe') ? { ...process.env, SDL_JOYSTICK_HIDAPI_STEAM: '0' } : process.env;
+}
+// Emulators that start with no controller buttons set get a standard gamepad layout, so a pad works straight away.
+// Only when nothing is bound yet: anything the player set themselves is left alone. melonDS: SDL button numbers of
+// an Xbox-style pad, d-pad as hat 0 (0x100 + up 1 / right 2 / down 4 / left 8), DS A/B on the pad's east/south.
+const PAD_DEFAULTS = {
+  'melonds.exe': { file: 'melonDS.toml', section: '[Instance0.Joystick]',
+    keys: { A: 1, B: 0, X: 3, Y: 2, L: 4, R: 5, Select: 6, Start: 7, Up: 0x101, Right: 0x102, Down: 0x104, Left: 0x108 } },
+};
+function padDefaults(exe) {
+  const d = PAD_DEFAULTS[path.basename(exe).toLowerCase()];
+  if (!d) return;
+  try {
+    const file = path.join(path.dirname(exe), d.file);
+    const text = fs.readFileSync(file, 'utf8');
+    const a = text.indexOf(d.section);
+    if (a < 0) return;
+    const next = text.indexOf('\n[', a + d.section.length);
+    const b = next < 0 ? text.length : next;
+    let sec = text.slice(a, b);
+    const bound = Object.keys(d.keys).some(k => { const m = sec.match(new RegExp(`^${k} = (-?\\d+)`, 'm')); return m && m[1] !== '-1'; });
+    if (bound) return;
+    for (const [k, v] of Object.entries(d.keys)) sec = sec.replace(new RegExp(`^${k} = -1`, 'm'), `${k} = ${v}`);
+    fs.writeFileSync(file, text.slice(0, a) + sec + text.slice(b));
+  } catch {}
+}
 function splitArgs(s) {
   const out = []; let cur = '', q = false, any = false;
   for (const ch of s || '') {
@@ -1161,7 +1191,8 @@ async function launchDirect(game) {
   const args = Array.isArray(entry?.args) ? entry.args.map(String) : [];
   const cwd = entry?.cwd && fs.existsSync(entry.cwd) ? entry.cwd : path.dirname(exe);
   return new Promise((resolve, reject) => {
-    const child = spawn(exe, args, { cwd, detached: true, stdio: 'ignore' });
+    padDefaults(exe);
+    const child = spawn(exe, args, { cwd, env: launchEnv(), detached: true, stdio: 'ignore' });
     child.once('error', e => reject(new Error(`Launch failed: ${e.message}`)));
     child.once('spawn', () => { track(game, child); child.unref(); resolve(true); });
   });
@@ -1203,7 +1234,8 @@ function launchGame(gameId, options = {}) {
   const args = splitArgs(tpl).map(a => a.split('{rom}').join(rom));
   return new Promise((resolve, reject) => {
     // detached: the game keeps running if Harbour is closed or restarted while playing.
-    const child = spawn(exe, args, { cwd: path.dirname(exe), detached: true, stdio: 'ignore' });
+    padDefaults(exe);
+    const child = spawn(exe, args, { cwd: path.dirname(exe), env: launchEnv(), detached: true, stdio: 'ignore' });
     child.once('error', e => reject(new Error(`Launch failed: ${e.message}`)));
     child.once('spawn', () => { track(game, child); resolve(true); });
   });
@@ -1998,7 +2030,8 @@ handle('emu:openFolder', id => { const exe = resolveExe(id); if (exe) shell.open
 handle('emu:open', id => {
   const exe = resolveExe(id);
   if (!exe) throw new Error("Can't find that emulator's program.");
-  spawn(exe, [], { cwd: path.dirname(exe), detached: true, stdio: 'ignore' }).unref();
+  padDefaults(exe);
+  spawn(exe, [], { cwd: path.dirname(exe), env: launchEnv(), detached: true, stdio: 'ignore' }).unref();
   return true;
 });
 handle('emu:pickExe', async id => {
