@@ -47,8 +47,8 @@ icon.
 Then, in Harbour:
 
 1. **Settings → Emulators & game folders → Manage**: add your games folder, and the emulators you already have.
-2. **＋** adds a PC port or recomp: pick its folder (Harbour finds the program), the console it's from, and its GitHub
-   page if you want update checks.
+2. **＋ → PC port / recomp**: pick its folder. Harbour finds the program, its GitHub project and which version you
+   have, and the game's name and console; check them and press Add.
 3. Artwork and clips arrive by themselves. Settings also has buttons to fetch them for everything.
 
 Everything Harbour keeps (settings, artwork, clips, logs) lives in `data\` inside its folder.

@@ -91,28 +91,20 @@
     <div id="addPick">
       <h2>Add to Harbour</h2>
       <div class="choices">
-        <button type="button" class="choice" data-kind="port"><b>PC port / recomp</b><span>A game that runs on its own, like Banjo Recompiled. Pick its folder.</span></button>
-        <button type="button" class="choice" data-kind="rom"><b>Game for an emulator</b><span>A game file (ROM, ISO, NSP, folder dump) that an emulator plays.</span></button>
+        <button type="button" class="choice" data-kind="port"><b>PC port / recomp</b><span>Pick its folder. Harbour works out the rest.</span></button>
         <button type="button" class="choice" data-kind="emu"><b>Emulator</b><span>An emulator you already have, like Eden or PCSX2.</span></button>
       </div>
+      <p class="note">Games for emulators come from your game folders (Settings → Emulators &amp; game folders).</p>
       <div class="dlg-actions"><button type="button" class="addCancel">Cancel</button></div>
     </div>
+    <!-- Filled in by Harbour after you pick the folder; change anything it got wrong -->
     <form id="addPort" hidden>
       <h2>Add a PC port / recomp</h2>
-      <label>Console it's from (its shelf)<select name="platform"></select></label>
-      <label>Name <small>(leave empty to use the folder's name)</small><input name="title" placeholder="e.g. Banjo-Kazooie" autocomplete="off" spellcheck="false" /></label>
-      <label>GitHub page for updates <small>(optional)</small><input name="repo" placeholder="owner/name or its GitHub link" autocomplete="off" spellcheck="false" /></label>
-      <label class="check"><input type="checkbox" name="auto" checked /> Install updates for me</label>
-      <p class="note">Next you choose the game's folder. Harbour finds the program that starts it and gets its artwork and a gameplay clip.</p>
-      <div class="dlg-actions"><button type="button" class="addBack">Back</button><button class="primary">Choose folder…</button></div>
-    </form>
-    <form id="addRom" hidden>
-      <h2>Add a game for an emulator</h2>
+      <p id="portFound" class="note"></p>
+      <label>Name<input name="title" autocomplete="off" spellcheck="false" /></label>
       <label>Console<select name="platform"></select></label>
-      <label>Emulator for this console<select name="emulator"></select></label>
-      <label>Name <small>(optional)</small><input name="title" autocomplete="off" spellcheck="false" /></label>
-      <p class="note">Next you choose the game's file. For a Switch folder dump, choose the file called "main" inside exefs.</p>
-      <div class="dlg-actions"><button type="button" class="addBack">Back</button><button class="primary">Choose file…</button></div>
+      <label>GitHub page for updates<input name="repo" placeholder="not found: paste its link to get updates" autocomplete="off" spellcheck="false" /></label>
+      <div class="dlg-actions"><button type="button" class="addBack">Back</button><button class="primary">Add</button></div>
     </form>
     <form id="addEmu" hidden>
       <h2>Add an emulator</h2>

@@ -271,7 +271,14 @@ function createLaunchBox({ dataDir, normalize, download, onStatus = () => {},
     }
   }
 
-  return { find, load, details, available, platforms: PLATFORMS };
+  // The Harbour consoles a game name (as a lookup key) exists on, from the index on disk. [] when unknown.
+  async function consolesFor(key) {
+    if (!key || !available()) return [];
+    const index = await load(false, { offline: true });
+    return Object.entries(PLATFORMS).filter(([, platform]) => Object.hasOwn(index.names[platform] || {}, key)).map(([id]) => id);
+  }
+
+  return { find, load, details, available, consolesFor, platforms: PLATFORMS };
 }
 
 module.exports = { createLaunchBox, PLATFORMS };

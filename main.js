@@ -971,10 +971,14 @@ async function remoteZipNames(url) {
       dirSize = Number(z.readBigUInt64LE(40)); dirStart = Number(z.readBigUInt64LE(48));
     }
     const { bytes: dir } = await part(dirStart, dirStart + dirSize - 1);
+    // The names, with each file's unpacked size in names.sizes (used to tell which release a program is from).
     const names = [];
+    names.sizes = new Map();
     for (let p = 0; p + 46 <= dir.length && dir.readUInt32LE(p) === 0x02014b50;) {
       const n = dir.readUInt16LE(p + 28);
-      names.push(dir.toString('utf8', p + 46, p + 46 + n));
+      const name = dir.toString('utf8', p + 46, p + 46 + n);
+      names.push(name);
+      names.sizes.set(name, dir.readUInt32LE(p + 24));
       p += 46 + n + dir.readUInt16LE(p + 30) + dir.readUInt16LE(p + 32);
     }
     return names;
@@ -1377,9 +1381,183 @@ function findGameExe(folder) {
 // "BanjoKazooie-PC" -> "Banjo Kazooie", "gta-vcs-recomp" -> "Gta Vcs" (a starting point; you can rename it).
 const titleFromFolder = name => name.replace(/[-_ .](pc|port|recomp(iled)?|windows|win64|x64)$/i, '').replace(/[-_.]+/g, ' ')
   .replace(/([a-z])([A-Z])/g, '$1 $2').replace(/\s+/g, ' ').trim().replace(/\b\w/g, c => c.toUpperCase());
-handle('harbour:addPort', async ({ platform, title, repo, auto }) => {
-  if (platform && !config.systems.some(s => s.id === platform)) throw new Error('Unknown console.');
-  const source = String(repo || '').trim() ? { repo: parseRepo(repo), prerelease: false, auto: !!auto } : undefined;
+// ---- Working out what a PC port is, from its folder ----
+// Consoles named in text, most specific first ("Switch 2" before "Switch", "Xbox 360" before "Xbox").
+const CONSOLE_NAMES = [
+  ['switch2', /\bswitch ?2\b|\bnx2\b/i], ['switch', /\bswitch\b/i], ['x360', /xbox ?360|\bx360\b/i],
+  ['xbox', /\bxbox\b(?! ?(?:360|one|series))|\bog xbox\b/i], ['ps4', /\bps4\b|playstation ?4/i], ['ps3', /\bps3\b|playstation ?3/i],
+  ['ps2', /\bps2\b|playstation ?2/i], ['psp', /\bpsp\b/i], ['ps1', /\bps1\b|\bpsx\b|playstation(?! ?[2-5])/i],
+  ['n64', /\bn64\b|nintendo ?64/i], ['gc', /gamecube|\bngc\b/i], ['wiiu', /\bwii ?u\b/i], ['wii', /\bwii\b(?! ?u)/i],
+  ['3ds', /\b3ds\b/i], ['nds', /\bnds\b|nintendo ds\b/i], ['gba', /\bgba\b|game ?boy advance/i], ['dreamcast', /dreamcast/i],
+  ['genesis', /genesis|mega ?drive/i], ['snes', /\bsnes\b|super nintendo/i], ['nes', /\bnes\b/i],
+];
+const consolesNamedIn = text => CONSOLE_NAMES.filter(([, re]) => re.test(text || '')).map(([id]) => id);
+// "SuperMarioOdyssey_v2" -> "Super Mario Odyssey v2"
+const splitName = s => String(s || '').replace(/\.exe$/i, '').replace(/([a-z])([A-Z0-9])/g, '$1 $2').replace(/[-_.]+/g, ' ').trim();
+const PORT_JARGON = /\b(re-?comp(?:iled|ilation)?|static|native|pc|ports?|decomp(?:iled|ilation)?|launcher|win(?:dows|64)?|x64|setup|portable|release)\b/gi;
+
+// GitHub projects the game's own files link to (readme, licence, credits), most mentioned first.
+function linkedRepos(folder) {
+  const counts = new Map();
+  let budget = 400;  // files looked at, so a folder of unpacked game data doesn't take minutes
+  const walk = (dir, depth) => {
+    let entries = [];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    if (depth > 0 && entries.length > 300) return;  // a data folder, not docs
+    for (const e of entries) {
+      if (budget <= 0) return;
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) { if (depth < 2 && !/^(_harbour-backup|node_modules|\.git|cache|shaders?|saves?|romfs|exefs)$/i.test(e.name)) walk(p, depth + 1); continue; }
+      if (!/\.(md|txt|json|ini|toml|ya?ml|cfg|html?)$|^(license|readme|credits|notice)/i.test(e.name)) continue;
+      budget--;
+      let text = '';
+      try { if (fs.statSync(p).size < 300 * 1024) text = fs.readFileSync(p, 'utf8'); } catch { continue; }
+      for (const m of text.matchAll(/github\.com\/([\w.-]+)\/([\w.-]+?)(?:\.git)?(?=[/\s"'`)<>#?,]|$)/gi)) {
+        const repo = `${m[1]}/${m[2]}`;
+        if (!/^(sponsors|orgs|features|topics|login)$/i.test(m[1])) counts.set(repo, (counts.get(repo) || 0) + 1);
+      }
+    }
+  };
+  walk(folder, 0);
+  return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([repo]) => repo);
+}
+
+// Is this project the one in the folder? Its newest release must hold the program. The release whose copy of the
+// program is exactly the size of yours is the version you have (exact: true); failing that, the newest release
+// published by the time your copy was made.
+async function matchReleases(repo, exe) {
+  const want = path.basename(exe).toLowerCase(), { size, mtimeMs } = fs.statSync(exe);
+  let releases;
+  try { releases = (await ghJson(`https://api.github.com/repos/${repo}/releases?per_page=4`)).filter(r => !r.draft); } catch { return null; }
+  const held = [];
+  for (const [i, rel] of releases.entries()) {
+    const asset = guessAsset(rel.assets || []);
+    if (!asset || !/\.zip$/i.test(asset.name)) continue;
+    const names = await remoteZipNames(asset.browser_download_url);
+    if (!names) continue;
+    const inside = names.find(n => n.split('/').pop().toLowerCase() === want);
+    if (!inside) { if (i === 0) return null; continue; }   // the newest release doesn't have it: not this project
+    const installed = { tag: rel.tag_name, assetId: asset.id, date: asset.updated_at || rel.published_at };
+    if (names.sizes.get(inside) === size) return { repo, prerelease: rel.prerelease, installed, exact: true };
+    held.push(installed);
+  }
+  if (!held.length) return null;
+  const byDate = held.find(r => Date.parse(r.date) <= mtimeMs + 2 * 864e5) || null;
+  return { repo, prerelease: !!releases[0]?.prerelease, installed: byDate, exact: false };
+}
+
+// Words around a title that aren't part of it ("the Perfect Dark", "Nitro-Fueled and").
+const EDGE_WORDS = /^(the|a|an|and|of|for|on|in|to|with|by|is|from)$/i;
+// The game's real name and console: the longest run of words in the project's description, readme title, repo name
+// or folder name that the LaunchBox database knows on a console (its PC listings are often the fan ports themselves,
+// so they don't count). A console named in the text decides between several.
+// When a game came out on several consoles and nothing names one: the consoles PC ports are usually made from first.
+const PORT_CONSOLES = ['n64', 'ps2', 'x360', 'xbox', 'switch', 'gc', 'ps1', 'ps3', 'wii', 'switch2', 'ps4', 'dreamcast', 'psp', 'wiiu', 'snes', 'genesis', 'nds', '3ds', 'gba', 'gbc', 'gb', 'nes', 'a2600', 'arcade'];
+const portRank = id => { const i = PORT_CONSOLES.indexOf(id); return i < 0 ? 99 : i; };
+async function nameAndConsole(texts, ownName = '', clues = []) {
+  texts = texts.filter(Boolean).map(t => t.replace(PORT_JARGON, ' '));
+  const named = [...new Set([...clues, ...consolesNamedIn(texts.join(' \n '))])];
+  // The first text with a match wins (the project's own title and description before anything it mentions later);
+  // within it, the longest match.
+  for (const text of texts) {
+    let best = null;
+    const words = text.replace(/[^\p{L}\p{N}'&:!.\- ]+/gu, ' ').split(/\s+/).map(w => w.replace(/^[:.\-]+$/, '')).filter(Boolean);
+    for (let len = Math.min(words.length, 8); len >= 1; len--)
+      for (let start = 0; start + len <= words.length; start++) {
+        let run = words.slice(start, start + len);
+        while (run.length && EDGE_WORDS.test(run[0].replace(/[:.\-]/g, '')) && run[0][0] === run[0][0].toLowerCase()) run = run.slice(1);
+        while (run.length && EDGE_WORDS.test(run.at(-1).replace(/[:.\-]/g, ''))) run = run.slice(0, -1);
+        const phrase = run.join(' ').replace(/^[:.\-]+|[:.\-]+$/g, '').trim();
+        const key = looseKey(phrase);
+        // A name starts with a capital or a number ("using" in a sentence is not the game Using).
+        if (key.length < 5 || key === ownName || !/^[\p{Lu}\p{N}]/u.test(phrase) || (best && key.length <= best.key.length)) continue;
+        const consoles = (await launchbox.consolesFor(key)).filter(c => c !== 'pc');
+        if (!consoles.length) continue;
+        const pick = consoles.find(c => named.includes(c)) || [...consoles].sort((a, b) => portRank(a) - portRank(b))[0];
+        best = { key, title: phrase, platform: pick };
+      }
+    if (best) return { title: best.title, platform: best.platform };
+  }
+  return { title: null, platform: named.find(c => c !== 'pc') || null };
+}
+
+// Consoles the game's own folder gives away: its readme and notes, and files only one console's games have.
+const CONSOLE_FILES = [['n64', /\.(z64|n64|v64)$/i], ['switch', /^(romfs|exefs)$|\.(nsp|xci)$/i], ['x360', /\.xex$/i], ['xbox', /\.xbe$/i],
+  ['ps2', /\.(elf|irx)$|^slus_|^sles_/i], ['gc', /\.(gcm|rvz)$/i], ['ps1', /\.cue$/i]];
+function consoleClues(folder) {
+  const found = new Set();
+  let text = '', budget = 200;
+  const walk = (dir, depth) => {
+    let entries = [];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (budget-- <= 0) return;
+      for (const [id, re] of CONSOLE_FILES) if (re.test(e.name)) found.add(id);
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) { if (depth < 1 && entries.length < 300) walk(p, depth + 1); continue; }
+      if (/\.(md|txt)$|^readme/i.test(e.name)) try { if (fs.statSync(p).size < 100 * 1024) text += fs.readFileSync(p, 'utf8').slice(0, 4000) + '\n'; } catch {}
+    }
+  };
+  walk(folder, 0);
+  for (const id of consolesNamedIn(text)) found.add(id);
+  return [...found];
+}
+
+// Folder names that say nothing about the game: look one folder up as well.
+const GENERIC_FOLDER = /^(launcher|bin|game|port|app|x64|win64|windows|build|release|dist|portable|files)$/i;
+
+async function detectPort(folder, exe) {
+  // 1. Which GitHub project: ones the game's files link to, then a search on its folder and program names.
+  const folders = [path.basename(folder)];
+  if (GENERIC_FOLDER.test(folders[0])) folders.push(path.basename(path.dirname(folder)));
+  const candidates = linkedRepos(GENERIC_FOLDER.test(folders[0]) ? path.dirname(folder) : folder);
+  const linked = new Set(candidates);
+  // A name without the port jargon ("sly2-windows-x64" -> "sly2").
+  const plain = s => splitName(String(s || '').replace(/[-_.]+/g, ' ').replace(PORT_JARGON, ' ')).replace(PORT_JARGON, ' ').replace(/\s+/g, ' ').trim();
+  const names = [...new Set([...folders, path.basename(exe)].flatMap(n => [plain(n), splitName(n)]))].filter(n => n.length > 2 && !GENERIC_FOLDER.test(n));
+  for (const n of names.slice(0, 3)) {  // GitHub allows only a few searches a minute
+    try {
+      const found = await ghJson(`https://api.github.com/search/repositories?q=${encodeURIComponent(n)}&sort=stars&per_page=5`);
+      for (const r of found.items || []) candidates.push(r.full_name);
+    } catch {}
+  }
+  // The first project whose release has exactly your program wins. One that only holds a program of that name
+  // counts just when the game's own files link to it: from a search alone it could be a fork (blank beats wrong).
+  // (linked: the projects the game's own files mention, captured before the search results were added)
+  let match = null;
+  for (const repo of [...new Set(candidates)].slice(0, 8)) {
+    const m = await matchReleases(repo, exe);
+    if (!m) continue;
+    if (m.exact) { match = m; break; }
+    if (linked.has(repo)) match ||= m;
+  }
+
+  // 2. Its name and console, from the project's description and readme title, else the folder's name.
+  // The GitHub description usually names the game ("A PC port of Super Mario 64"); a readme's title is often the
+  // port's own name ("Ghostship"), and the rest of the readme mentions other games too, so it comes last.
+  let description = '', readmeTitle = '', readmeBody = '';
+  if (match) {
+    try { description = (await ghJson(`https://api.github.com/repos/${match.repo}`)).description || ''; } catch {}
+    try {
+      const readme = Buffer.from((await ghJson(`https://api.github.com/repos/${match.repo}/readme`)).content || '', 'base64').toString('utf8');
+      readmeTitle = (/^#\s+(.+)$/m.exec(readme) || [])[1] || '';
+      readmeBody = readme.slice(0, 1500);
+    } catch {}
+  }
+  // The project's own name ("Ghostship") isn't the game's name, even if the games database lists it.
+  const ownName = match ? looseKey(plain(match.repo.split('/')[1])) : '';
+  const guess = await nameAndConsole([description, readmeTitle, match && plain(match.repo.split('/')[1]), ...folders.map(plain), plain(path.basename(exe)), readmeBody], ownName, consoleClues(GENERIC_FOLDER.test(folders[0]) ? path.dirname(folder) : folder));
+  return {
+    title: (guess.title || plain(folders.at(-1)) || titleFromFolder(path.basename(folder))).slice(0, 120),
+    platform: guess.platform && config.systems.some(s => s.id === guess.platform) ? guess.platform : '',
+    repo: match?.repo || '', prerelease: !!match?.prerelease, installed: match?.installed || null,
+  };
+}
+
+// Works out a port's project, version, name and console (also run when adding one).
+handle('harbour:detectPort', ({ folder, executable }) => detectPort(folder, executable));
+// Step 1 of adding a PC port: choose its folder; Harbour finds the program and works out the rest.
+handle('harbour:pickPort', async () => {
   const picked = await dialog.showOpenDialog(win, { title: 'Choose the game\'s folder', properties: ['openDirectory'] });
   if (picked.canceled) return null;
   const folder = picked.filePaths[0];
@@ -1390,8 +1568,18 @@ handle('harbour:addPort', async ({ platform, title, repo, auto }) => {
     if (r.canceled) return null;
     executable = r.filePaths[0];
   }
+  const found = await detectPort(folder, executable);
+  log(`detected ${folder}: ${JSON.stringify(found)}`);
+  return { folder, executable, exeName: path.basename(executable), ...found };
+});
+// Step 2: add it as confirmed.
+handle('harbour:addPort', async ({ folder, executable, platform, title, repo, prerelease, installed }) => {
+  if (!folder || !executable || !fs.existsSync(executable)) throw new Error('Choose the game\'s folder first.');
+  if (platform && !config.systems.some(s => s.id === platform)) throw new Error('Unknown console.');
+  if (config.extraGames.some(x => x.system === 'recomp' && path.resolve(x.path) === path.resolve(folder))) throw new Error('That game is already in Harbour.');
+  const source = String(repo || '').trim() ? { repo: parseRepo(repo), prerelease: !!prerelease } : undefined;
   const entry = { id: randomUUID().slice(0, 8), system: 'recomp', path: folder, title: String(title || '').trim().slice(0, 120) || titleFromFolder(path.basename(folder)),
-    executable, platform: platform || undefined, source };
+    executable, platform: platform || undefined, source, installed: source && installed?.tag ? installed : undefined };
   config.extraGames.push(entry); saveConfig(config);
   return { ...entry, exeName: path.basename(executable) };
 });
@@ -1632,32 +1820,6 @@ handle('harbour:setSystemEmulator', ({ system, emulator }) => {
   if (emulator && !emuDef(emulator)) throw new Error('That emulator is not set up.');
   sys.emulator = emulator || ''; saveConfig(config);
   return true;
-});
-handle('game:add', async ({ system, title }) => {
-  const sys = config.systems.find(s => s.id === system);
-  if (!sys) throw new Error('Choose a system first.');
-  if (sys.id === 'recomp') {
-    const picked = await dialog.showOpenDialog(win, {title:'Choose the standalone game folder',properties:['openDirectory']});
-    if (picked.canceled) return null;
-    const folder = picked.filePaths[0];
-    if (!fs.statSync(folder).isDirectory()) throw new Error('Choose a game folder.');
-    if (config.extraGames.some(x => x.system === 'recomp' && path.resolve(x.path) === path.resolve(folder))) throw new Error('That game folder is already in Recomp.');
-    const entry = {id:randomUUID().slice(0,8),system:'recomp',path:folder,title:String(title || '').trim().slice(0,120) || path.basename(folder)};
-    config.extraGames.push(entry); saveConfig(config); return entry;
-  }
-  const exts = (sys.extensions || []).map(e => e.replace(/^\./, '')).filter(Boolean);
-  const r = await dialog.showOpenDialog(win, { title: `Add a game to ${sys.name}`, properties: ['openFile'],
-    filters: [...(exts.length ? [{ name: `${sys.name} games`, extensions: exts }] : []), { name: 'All files', extensions: ['*'] }],
-    ...(sys.direct && process.platform === 'darwin' ? { defaultPath: '/Applications' } : {}) });
-  if (r.canceled) return null;
-  const file = r.filePaths[0];
-  if (config.extraGames.some(x => x.system === sys.id && path.resolve(x.path) === path.resolve(file))) throw new Error('That game is already in your library.');
-  // A program inside its own folder ("Hollow Knight\hollow_knight.exe") is named after the folder.
-  const guess = /\.(exe|app)$/i.test(file) && path.basename(path.dirname(file)).length > 2 ? path.basename(path.dirname(file)) : displayTitle(path.basename(file, path.extname(file)));
-  const entry = { id: randomUUID().slice(0, 8), system: sys.id, path: file, title: String(title || '').trim().slice(0, 120) || guess };
-  config.extraGames.push(entry);
-  saveConfig(config);
-  return entry;
 });
 handle('game:remove', id => {
   config.extraGames = config.extraGames.filter(x => x.id !== id);

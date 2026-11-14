@@ -383,34 +383,38 @@ async function emulatorsFor(sysId) {
   return [...list.filter(e => fits(e) && (e.exe || e.custom)), ...list.filter(e => !fits(e) && e.exe)];
 }
 function showAddStep(step) {
-  for (const id of ['addPick', 'addPort', 'addRom', 'addEmu']) $('#' + id).hidden = id !== step;
+  for (const id of ['addPick', 'addPort', 'addEmu']) $('#' + id).hidden = id !== step;
   $('#' + step).querySelector('select, input, button')?.focus();
 }
 async function openAdd() {
   UISound.play('open');
-  const port = $('#addPort'), rom = $('#addRom');
-  port.platform.replaceChildren(option('', 'No console (Recomp shelf)'), ...consoles().map(s => option(s.id, s.name)));
-  port.platform.value = S.tab !== 'all' && S.tab !== 'favorites' ? S.tab : '';
-  rom.platform.replaceChildren(...consoles().map(s => option(s.id, s.name)));
-  rom.platform.value = consoles().some(s => s.id === S.tab) ? S.tab : 'n64';
-  await fillRomEmulators();
+  $('#addPort').platform.replaceChildren(option('', 'No console (Recomp shelf)'), ...consoles().map(s => option(s.id, s.name)));
   $('#emuSystems').replaceChildren(...consoles().map(s => { const l = el('label', 'check'); const c = el('input'); c.type = 'checkbox'; c.value = s.id; l.append(c, s.name); return l; }));
-  for (const f of [port, rom, $('#addEmu')]) f.querySelectorAll('input[type=text], input:not([type])').forEach(i => { if (i.name !== 'args') i.value = ''; });
+  for (const f of [$('#addPort'), $('#addEmu')]) f.querySelectorAll('input[type=text], input:not([type])').forEach(i => { if (i.name !== 'args') i.value = ''; });
   showAddStep('addPick');
   $('#addDlg').showModal();
 }
-async function fillRomEmulators() {
-  const rom = $('#addRom'), sys = S.config.systems.find(s => s.id === rom.platform.value);
-  const emus = await emulatorsFor(rom.platform.value);
-  const fitting = emus.filter(e => (e.systems || []).includes(rom.platform.value));
-  rom.emulator.replaceChildren(...emus.map(e => option(e.id, e.name + (fitting.includes(e) ? '' : ' (not set up for this console)'))),
-    option('', fitting.length ? 'None for now' : 'None yet: add one with ＋ → Emulator first'));
-  // Only suggest an emulator that's actually meant for this console.
-  rom.emulator.value = emus.some(e => e.id === sys?.emulator) ? sys.emulator : fitting[0]?.id || '';
+// PC port: pick its folder; Harbour finds the program, its GitHub project and version, its name and console.
+async function pickPort() {
+  $('#addDlg').close();
+  let found;
+  try {
+    Activity.set('addport', 'Looking up the game…');
+    found = await api.pickPort();
+    if (!found) { Activity.end('addport', 'Cancelled', 'ok', '', 1); return; }
+    Activity.done('addport', 'Found it');
+  } catch (e) { UISound.play('error'); Activity.fail('addport', e.message); return; }
+  S.portFound = found;
+  const f = $('#addPort');
+  f.title.value = found.title || '';
+  f.platform.value = found.platform || '';
+  f.repo.value = found.repo || '';
+  $('#portFound').textContent = `${found.exeName}` + (found.repo ? ` · ${found.installed ? `you have ${found.installed.tag}` : 'version unknown'}` : '');
+  showAddStep('addPort');
+  $('#addDlg').showModal();
 }
-$('#addRom').platform.onchange = fillRomEmulators;
 $('#btnAdd').onclick = openAdd;
-for (const b of document.querySelectorAll('#addDlg .choice')) b.onclick = () => { UISound.play('select'); showAddStep({ port: 'addPort', rom: 'addRom', emu: 'addEmu' }[b.dataset.kind]); };
+for (const b of document.querySelectorAll('#addDlg .choice')) b.onclick = () => { UISound.play('select'); if (b.dataset.kind === 'port') pickPort(); else showAddStep('addEmu'); };
 for (const b of document.querySelectorAll('#addDlg .addBack')) b.onclick = () => { UISound.play('back'); showAddStep('addPick'); };
 for (const b of document.querySelectorAll('#addDlg .addCancel')) b.onclick = () => { UISound.play('back'); $('#addDlg').close(); };
 // After adding: show it, then fetch its artwork and a gameplay clip without being asked.
@@ -421,23 +425,18 @@ async function afterAdd(match, what) {
   if (!g) { toast(`${what} added.`); return; }
   setTab(g.system); select(S.list.findIndex(x => x.id === g.id));
   UISound.play('select');
-  toast(`Added ${g.title}. Getting its artwork and a gameplay clip… (rename it in ••• if the name's wrong)`, 7000);
+  toast(`Added ${g.title}.`, 4000);
   await downloadArt('game', g.id);
   const waitArt = setInterval(async () => { if (!S.artBusy) { clearInterval(waitArt); downloadVideos('game', g.id, 'missing'); } }, 1500);
 }
 $('#addPort').addEventListener('submit', async e => {
-  e.preventDefault(); const f = e.target;
+  e.preventDefault(); const f = e.target, found = S.portFound;
+  if (!found) return;
   try {
-    const entry = await api.addPort({ platform: f.platform.value, title: f.title.value, repo: f.repo.value, auto: f.auto.checked });
-    if (entry) afterAdd(g => g.added === entry.id, entry.title);
-  } catch (err) { UISound.play('error'); toast(err.message, 6000); }
-});
-$('#addRom').addEventListener('submit', async e => {
-  e.preventDefault(); const f = e.target, system = f.platform.value;
-  try {
-    const sys = S.config.systems.find(s => s.id === system);
-    if (f.emulator.value && f.emulator.value !== sys?.emulator) { await api.setSystemEmulator({ system, emulator: f.emulator.value }); S.config = await api.getConfig(); }
-    const entry = await api.gameAdd({ system, title: f.title.value });
+    // A changed GitHub link means the version Harbour matched no longer applies.
+    const sameRepo = f.repo.value.trim() === (found.repo || '');
+    const entry = await api.addPort({ folder: found.folder, executable: found.executable, platform: f.platform.value, title: f.title.value,
+      repo: f.repo.value, prerelease: sameRepo && found.prerelease, installed: sameRepo ? found.installed : null });
     if (entry) afterAdd(g => g.added === entry.id, entry.title);
   } catch (err) { UISound.play('error'); toast(err.message, 6000); }
 });
@@ -449,7 +448,7 @@ $('#addEmu').addEventListener('submit', async e => {
     if (!r) return;
     S.config = await api.getConfig();
     $('#addDlg').close(); UISound.play('select');
-    toast(`${r.name} added${systems.length ? ` for ${systems.map(id => shortName(S.config.systems.find(s => s.id === id)?.name || id)).join(', ')}` : ''}. Add games for it with ＋ → Game for an emulator.`, 7000);
+    toast(`${r.name} added.`, 4000);
   } catch (err) { UISound.play('error'); toast(err.message, 6000); }
 });
 

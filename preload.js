@@ -30,7 +30,8 @@ contextBridge.exposeInMainWorld('api', {
   setTitle: options => call('game:setTitle', options),
   openGameFolder: id => call('game:openFolder', id),
   chooseGameExecutable: id => call('game:chooseExecutable', id),
-  gameAdd: options => call('game:add', options),
+  pickPort: () => call('harbour:pickPort'),
+  detectPort: options => call('harbour:detectPort', options),
   gameRemove: id => call('game:remove', id),
   addPort: options => call('harbour:addPort', options),
   // emulators
