@@ -670,13 +670,14 @@ function guessAsset(assets) {
     if (/arm64|aarch64|armv7|x86(?!_64)|i686|32bit|win32(?!-x64)/.test(n)) return -1;
     let v = 0;
     if (win) {
-      if (!/\.(zip|7z|exe)$/.test(n)) return -1;
+      if (!/\.(zip|7z|rar|exe)$/.test(n)) return -1;
       if (/(macos|mac|osx|darwin|linux|android|ios|appimage|flatpak)/.test(n)) return -1;
       if (/win|windows|msvc|mingw/.test(n)) v += 4;
       if (/x64|x86_64|amd64|win64/.test(n)) v += 2;
-      if (/\.zip$|\.7z$/.test(n)) v += 2; // portable archives over installers
+      if (/\.(zip|7z|rar)$/.test(n)) v += 2; // portable archives over installers
       if (/setup|install/.test(n)) v -= 3;
       if (/rog-?ally|steam-?deck|legacy/.test(n)) return -1; // builds for one handheld or old CPUs
+      if (/no-?avx|no-?sse|compat|fallback|safe-?mode/.test(n)) v -= 3; // builds for old CPUs, when a normal one exists
       if (/msvc|clang|mingw|llvm/.test(n)) v -= .5; // when a plain build sits next to compiler variants, take the plain one
       if (/pgo/.test(n)) v += 1; // profile-optimised builds are the same program, just faster
     } else if (process.platform === 'darwin') {
@@ -857,7 +858,7 @@ function recompStatus(entry, latest) {
   const inst = entry.installed || null;
   const updateAvailable = !latest ? null : inst?.assetId ? inst.assetId !== latest.assetId : inst?.tag ? inst.tag !== latest.tag : null;
   return {
-    installed: inst, updateAvailable, auto: !!entry.source?.auto, repo: entry.source?.repo || null,
+    installed: inst, updateAvailable, auto: harbourInstalls(entry.source), repo: entry.source?.repo || null,
     latest: latest && { tag: latest.tag, name: latest.releaseName, date: latest.publishedAt, notes: latest.notes, page: latest.page, assetName: latest.assetName, size: latest.size },
   };
 }
@@ -937,6 +938,73 @@ async function unpackRelease(rel, archive, tmp, send) {
   const top = fs.readdirSync(stage, { withFileTypes: true });
   return top.length === 1 && top[0].isDirectory() ? path.join(stage, top[0].name) : stage;
 }
+// ---- Can Harbour install this update, and where do its files go? ----
+// Harbour installs every update itself unless you switched that off, or it found that a project's downloads are
+// not the program itself (a setup kit or builder that makes the game from your copy): then that project updates
+// with its own tool, and Harbour only says so.
+const harbourInstalls = source => !!source && source.auto !== false && !source.ownTool;
+class NotReadyToRun extends Error {}
+function updatesWithOwnTool(source, name) {
+  if (source && !source.ownTool) { source.ownTool = true; saveConfig(config); log(`${name}: downloads aren't ready-to-run builds, updates with its own tool`); }
+  return new NotReadyToRun(`${name} updates with its own tool (its download isn't the program itself). Open its release page to update it.`);
+}
+// The files inside a remote zip, read from its end with a few small range requests instead of downloading it all.
+// null when the server can't do that (the full download then decides).
+async function remoteZipNames(url) {
+  try {
+    const part = async (start, end) => {
+      const r = await fetch(url, { headers: { ...UA, Range: `bytes=${start}-${end}` }, signal: AbortSignal.timeout(20000) });
+      if (r.status !== 206) throw new Error('no ranges');
+      return { bytes: Buffer.from(await r.arrayBuffer()), size: Number((r.headers.get('content-range') || '').split('/')[1]) };
+    };
+    const { size } = await part(0, 0);
+    const tailLength = Math.min(size, 0xffff + 22);
+    const { bytes: tail } = await part(size - tailLength, size - 1);
+    const end = tail.lastIndexOf(Buffer.from('PK\x05\x06', 'latin1'));
+    if (end < 0) return null;
+    let dirSize = tail.readUInt32LE(end + 12), dirStart = tail.readUInt32LE(end + 16);
+    if (dirStart === 0xffffffff) {  // zip64: the real numbers are in the zip64 end record
+      const locator = tail.lastIndexOf(Buffer.from('PK\x06\x07', 'latin1'));
+      if (locator < 0) return null;
+      const at = Number(tail.readBigUInt64LE(locator + 8));
+      const { bytes: z } = await part(at, at + 55);
+      dirSize = Number(z.readBigUInt64LE(40)); dirStart = Number(z.readBigUInt64LE(48));
+    }
+    const { bytes: dir } = await part(dirStart, dirStart + dirSize - 1);
+    const names = [];
+    for (let p = 0; p + 46 <= dir.length && dir.readUInt32LE(p) === 0x02014b50;) {
+      const n = dir.readUInt16LE(p + 28);
+      names.push(dir.toString('utf8', p + 46, p + 46 + n));
+      p += 46 + n + dir.readUInt16LE(p + 30) + dir.readUInt16LE(p + 32);
+    }
+    return names;
+  } catch { return null; }
+}
+// Where an unpacked release goes: find the program you start (exe) inside it, and line the two up. A release whose
+// folders sit one level deeper or shallower than your install lines up by itself. null when the program isn't in
+// the release at all.
+function placeRelease(src, exe) {
+  if (!exe) return null;
+  const want = path.basename(exe).toLowerCase();
+  const found = [];
+  const walk = (dir, rel) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const r = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) { if (r.split('/').length < 6) walk(path.join(dir, e.name), r); }
+      else if (e.name.toLowerCase() === want) found.push(r);
+    }
+  };
+  walk(src, '');
+  const same = (a, b) => path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
+  for (const rel of found.sort((a, b) => a.split('/').length - b.split('/').length)) {
+    const parts = rel.split('/');
+    let root = path.dirname(exe);
+    for (let i = 1; i < parts.length; i++) root = path.dirname(root);
+    if (same(path.join(root, ...parts), exe) && fs.existsSync(root)) return root;
+  }
+  return null;
+}
+
 // Copy new files over a program folder: the files replaced go to _harbour-backup\<old version>,
 // settings files are kept, and only the newest two backups are left so the folder doesn't grow forever.
 async function installInto(folder, src, oldTag, send) {
@@ -962,6 +1030,7 @@ const updatingRecomps = new Set();
 async function updateRecomp(gameId, sendRaw) {
   const { game, entry } = recompEntry(gameId);
   if (!entry.source?.repo) throw new Error('Set an update source for this game first.');
+  if (!harbourInstalls(entry.source)) throw new NotReadyToRun(`${game.title} updates with its own tool. Open its release page to update it.`);
   if (updatingRecomps.has(gameId)) throw new Error('Already updating');
   if (running.has(gameId) || isRunning(entry.executable)) throw new Error('Close the game before updating it.');
   const send = p => sendRaw({ gameId, ...p });
@@ -972,11 +1041,21 @@ async function updateRecomp(gameId, sendRaw) {
     const hit = recompChecks.get(gameId);
     const rel = hit && hit.repo === entry.source.repo && Date.now() - hit.at < 10 * 60 * 1000 && hit.latest?.url ? hit.latest
       : await findRelease(entry.source.repo, { asset: entry.source.asset, prerelease: entry.source.prerelease });
+    // A zip's file list says, before the big download, whether it holds the game's program at all.
+    const exeName = entry.executable && path.basename(entry.executable).toLowerCase();
+    if (exeName && /\.zip$/i.test(rel.assetName)) {
+      send({ stage: 'Looking inside the release…', pct: 0 });
+      const names = await remoteZipNames(rel.url);
+      if (names && !names.some(n => n.split('/').pop().toLowerCase() === exeName)) throw updatesWithOwnTool(entry.source, game.title);
+    }
     const { archive, scan } = await fetchRelease(rel, tmp, send);
     const src = await unpackRelease(rel, archive, tmp, send);
-    const { kept, backup } = await installInto(entry.path, src, entry.installed?.tag, send);
+    // The release's files go wherever its copy of the program lines up with the one you start.
+    const root = entry.executable ? placeRelease(src, entry.executable) : entry.path;
+    if (!root) throw updatesWithOwnTool(entry.source, game.title);
+    const { kept, backup } = await installInto(root, src, entry.installed?.tag, send);
     if (entry.executable && !fs.existsSync(entry.executable)) {
-      const exe = guessProgram(entry.path, entry.source.repo);
+      const exe = guessProgram(root, entry.source.repo);
       if (exe) entry.executable = exe;
     }
     entry.installed = { tag: rel.tag, assetId: rel.assetId, date: rel.publishedAt, at: new Date().toISOString() };
@@ -1431,7 +1510,7 @@ async function latestEmulatorRelease(source, prerelease) {
 function emulatorUpdateStatus(e, latest, error) {
   noticeUpdate(e, resolveExe(e.id), latest, i => i.tag !== latest.tag, () => ({ tag: latest.tag }), e.name);
   const installed = e.installed?.tag || null;
-  return { id: e.id, source: e.source || null, installed, latest: latest || null, error: error || null, canInstall: !!e.source && !!resolveExe(e.id),
+  return { id: e.id, source: e.source || null, installed, latest: latest || null, error: error || null, canInstall: harbourInstalls(e.source) && !!resolveExe(e.id),
     updateAvailable: latest && installed ? latest.tag !== installed : null };
 }
 async function checkEmulator(id, force = false) {
@@ -1500,6 +1579,7 @@ handle('harbour:emuUpdate', async id => {
   const exe = e && resolveExe(id);
   if (!e?.source) throw new Error('Set where this emulator\'s updates come from first (Updates…).');
   if (!exe) throw new Error(`Can't find ${e.name}'s program. Choose it again first.`);
+  if (!harbourInstalls(e.source)) throw new NotReadyToRun(`${e.name} updates with its own tool. Open its release page to update it.`);
   if (updatingEmus.has(id)) throw new Error('Already updating.');
   if (running.size || isRunning(exe)) throw new Error(`Close ${e.name} (and any game) before updating it.`);
   const send = p => win?.webContents.send('recomp:progress', { gameId: 'emu:' + id, ...p });
@@ -1510,6 +1590,10 @@ handle('harbour:emuUpdate', async id => {
     const folder = path.dirname(exe);
     const viaInstaller = !canWrite(folder);
     const rel = await emulatorDownload(e.source, { installer: viaInstaller });
+    if (!viaInstaller && /\.zip$/i.test(rel.assetName)) {
+      const names = await remoteZipNames(rel.url);
+      if (names && !names.some(n => n.split('/').pop().toLowerCase() === path.basename(exe).toLowerCase())) throw updatesWithOwnTool(e.source, e.name);
+    }
     const { archive, scan } = await fetchRelease(rel, tmp, send);
     let kept = [];
     if (viaInstaller) {
@@ -1517,7 +1601,9 @@ handle('harbour:emuUpdate', async id => {
       await runInstallerElevated(archive);
     } else {
       const src = await unpackRelease(rel, archive, tmp, send);
-      ({ kept } = await installInto(folder, src, e.installed?.tag, send));
+      const root = placeRelease(src, exe);
+      if (!root) throw updatesWithOwnTool(e.source, e.name);
+      ({ kept } = await installInto(root, src, e.installed?.tag, send));
     }
     if (!fs.existsSync(exe)) throw new Error(`${path.basename(exe)} is gone after the update. Choose the program again in Emulators.`);
     e.installed = { tag: rel.tag, stamp: fileStamp(exe)?.id };

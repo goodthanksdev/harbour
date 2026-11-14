@@ -346,7 +346,7 @@ async function openRecompDialog(g) {
   editing = g; const f = $('#rdForm');
   f.platform.replaceChildren(...[{ id: '', name: 'Recomp shelf' }, ...consoles()].map(s => { const o = el('option', '', s.name); o.value = s.id; return o; }));
   f.platform.value = cur.platform || ''; f.repo.value = cur.source?.repo || ''; f.prerelease.checked = !!cur.source?.prerelease;
-  f.auto.checked = !!cur.source?.auto; f.asset.value = cur.source?.asset || ''; f.installedTag.value = cur.installed?.tag || '';
+  f.auto.checked = !cur.source || cur.source.auto !== false; f.asset.value = cur.source?.asset || ''; f.installedTag.value = cur.installed?.tag || '';
   $('#rdGame').textContent = g.title; const st = S.recomp[g.id];
   $('#rdStatus').textContent = st?.latest ? `Newest release: ${st.latest.tag}` : '';
   $('#recompDlg').showModal();
