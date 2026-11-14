@@ -125,7 +125,7 @@ body.ambient #hero { bottom: 0; }
 .item .card { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; padding: calc(14 * var(--u)); text-align: center;
   font-weight: 700; font-size: calc(17 * var(--u)); line-height: 1.2; background: linear-gradient(160deg, var(--c, #2a4a6a), #0b1522); }
 .item .card small { display: block; margin-top: calc(8 * var(--u)); font-weight: 400; color: var(--muted); font-size: .8em; }
-.item .badge { position: absolute; top: calc(6 * var(--u)); right: calc(6 * var(--u)); background: var(--beam); color: #2a1702; font-size: calc(12 * var(--u)); font-weight: 800; padding: calc(2 * var(--u)) calc(7 * var(--u)); border-radius: 999px; }
+.item .badge { position: absolute; bottom: calc(6 * var(--u)); right: calc(6 * var(--u)); box-shadow: 0 2px 8px rgba(0,0,0,.5); background: var(--beam); color: #2a1702; font-size: calc(12 * var(--u)); font-weight: 800; padding: calc(2 * var(--u)) calc(7 * var(--u)); border-radius: 999px; }
 .item .fav { position: absolute; bottom: calc(6 * var(--u)); left: calc(8 * var(--u)); color: #ffd166; font-size: calc(16 * var(--u)); text-shadow: 0 1px 4px #000; }
 #empty { position: absolute; left: calc(64 * var(--u)); top: 40%; color: var(--muted); font-size: calc(22 * var(--u)); }
 
