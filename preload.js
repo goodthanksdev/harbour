@@ -44,6 +44,7 @@ contextBridge.exposeInMainWorld('api', {
   setEmulatorSource: options => call('harbour:setEmulatorSource', options),
   checkEmulators: force => call('harbour:checkEmulators', force),
   openEmulatorPage: id => call('harbour:openEmulatorPage', id),
+  emuUpdate: id => call('harbour:emuUpdate', id),
   // recomp updates
   recompGet: id => call('recomp:get', id),
   recompSet: opts => call('recomp:set', opts),

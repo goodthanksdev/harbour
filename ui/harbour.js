@@ -139,7 +139,7 @@ function pendingUpdates() {
   const games = Object.entries(S.recomp).filter(([, s]) => s.updateAvailable).map(([id, s]) => ({ kind: 'game', id, s, g: S.games.find(g => g.id === id) }))
     .filter(u => u.g).map(u => ({ ...u, name: u.g.title, from: u.s.installed?.tag, to: u.s.latest?.tag, auto: !!u.s.auto }));
   const emus = Object.entries(S.emuStatus || {}).filter(([, s]) => s.updateAvailable)
-    .map(([id, s]) => ({ kind: 'emu', id, s, name: (S.emus || []).find(e => e.id === id)?.name || id, from: s.installed, to: s.latest?.tag, auto: false }));
+    .map(([id, s]) => ({ kind: 'emu', id, s, name: (S.emus || []).find(e => e.id === id)?.name || id, from: s.installed, to: s.latest?.tag, auto: !!s.canInstall }));
   return [...games, ...emus];
 }
 function openUpdates() { UISound.play('open'); renderUpdates(); if (!$('#updatesDlg').open) $('#updatesDlg').showModal(); }
@@ -166,14 +166,18 @@ async function updateOne(u) {
   if (updating) return toast('An update is already running.');
   updating = true;
   S.updatingName = u.name; Activity.set('update', `Updating ${u.name}…`);
-  try { S.recomp[u.id] = await api.recompUpdate(u.id); UISound.play('select'); Activity.done('update', `${u.name} updated to ${u.to}`); }
-  catch (e) { UISound.play('error'); Activity.fail('update', `${u.name}: ${e.message}`); }
+  try {
+    if (u.kind === 'emu') S.emuStatus[u.id] = await api.emuUpdate(u.id);
+    else S.recomp[u.id] = await api.recompUpdate(u.id);
+    UISound.play('select'); Activity.done('update', `${u.name} updated to ${u.to}`); return true;
+  } catch (e) { UISound.play('error'); Activity.fail('update', `${u.name}: ${e.message}`); return false; }
   finally { updating = false; afterUpdates(); }
 }
 $('#updAll').onclick = async () => {
   const autos = pendingUpdates().filter(u => u.auto);
-  for (const u of autos) await updateOne(u); // one at a time: each downloads, checks and backs up on its own
-  toast(autos.length ? `Done: ${autos.length} update${autos.length === 1 ? '' : 's'} installed.` : 'Nothing to install automatically.', 6000);
+  let ok = 0;
+  for (const u of autos) if (await updateOne(u)) ok++; // one at a time: each downloads, checks and backs up on its own
+  if (autos.length > 1) toast(`${ok} of ${autos.length} updates installed.`, 6000);
 };
 $('#updClose').onclick = () => { UISound.play('back'); $('#updatesDlg').close(); };
 $('#updatePill').onclick = openUpdates;
@@ -482,10 +486,11 @@ async function renderEmulators() {
     const where = st.source ? (st.source.type === 'github' ? st.source.repo : `${st.source.host}/${st.source.repo}`) : null;
     const line = !where ? 'Updates: no source set, so Harbour can\'t tell when there\'s a new version.'
       : `Updates from ${where} · you have ${st.installed || '?'} · newest ${st.latest?.tag || '?'}` + (st.error ? ' (couldn\'t check)' : '');
-    const upd = el('div', 'emu-update'); upd.append(emuBadge(info, 'emu-chip', st.updateAvailable ? `${st.latest.tag} available: update it in ${e.name}` : !e.exe ? 'Program missing' : where && st.installed ? 'Up to date' : 'Version unknown'), el('small', '', line));
+    const upd = el('div', 'emu-update'); upd.append(emuBadge(info, 'emu-chip', st.updateAvailable ? `${st.latest.tag} available` : !e.exe ? 'Program missing' : where && st.installed ? 'Up to date' : 'Version unknown'), el('small', '', line));
     const btns = el('div', 'emu-btns');
     const b = (text, fn, cls = '') => { const x = el('button', cls, text); x.type = 'button'; x.onclick = fn; btns.append(x); };
     if (e.custom) b('Consoles…', () => editEmuConsoles(e, card));
+    if (st.updateAvailable && st.canInstall) b(`Update to ${st.latest.tag}`, () => updateOne({ kind: 'emu', id: e.id, name: e.name, to: st.latest.tag }).then(() => renderEmulators()), 'primary');
     b('Updates…', () => editEmuSource(e, st, card));
     if (where) b('Release page', () => api.openEmulatorPage(e.id).catch(err => toast(err.message)));
     b('Change program…', async () => { const r = await api.emuPickExe(e.id).catch(err => toast(err.message)); if (r) { toast(`${e.name} now uses ${r.exe.split(/[\\/]/).pop()}.`); renderEmulators(); } });

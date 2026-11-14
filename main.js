@@ -676,7 +676,9 @@ function guessAsset(assets) {
       if (/x64|x86_64|amd64|win64/.test(n)) v += 2;
       if (/\.zip$|\.7z$/.test(n)) v += 2; // portable archives over installers
       if (/setup|install/.test(n)) v -= 3;
+      if (/rog-?ally|steam-?deck|legacy/.test(n)) return -1; // builds for one handheld or old CPUs
       if (/msvc|clang|mingw|llvm/.test(n)) v -= .5; // when a plain build sits next to compiler variants, take the plain one
+      if (/pgo/.test(n)) v += 1; // profile-optimised builds are the same program, just faster
     } else if (process.platform === 'darwin') {
       // Mac: archives that hold an .app (disk images can't be unpacked here).
       if (/(windows|win64|win32|\.exe$|linux|appimage|android|\.deb$|\.rpm$|\.dmg$)/.test(n)) return -1;
@@ -907,46 +909,72 @@ async function copyUpdate(src, dest, backup, kept) {
     await fsp.copyFile(from, to);
   }
 }
+// Download a release file, check it (checksum when the site gives one, Windows Defender), and give
+// back the folder of new files ready to copy. The caller removes tmp afterwards.
+async function fetchRelease(rel, tmp, send) {
+  const archive = path.join(tmp, rel.assetName);
+  const r = await fetch(rel.url, { headers: { 'User-Agent': UA['User-Agent'] } });
+  if (!r.ok) throw new Error(`Download failed: HTTP ${r.status}`);
+  const total = Number(r.headers.get('content-length')) || rel.size || 0;
+  let got = 0, last = 0;
+  await downloadTo(r, archive, chunk => {
+    got += chunk.length;
+    if (Date.now() - last > 120) { last = Date.now(); send({ stage: `Downloading ${rel.assetName}`, pct: total ? got / total : 0 }); }
+  });
+  send({ stage: 'Checking the download…', pct: 1 });
+  if (rel.digest && /^sha256:/i.test(rel.digest)) {
+    const want = rel.digest.slice(7).toLowerCase(), have = await sha256File(archive);
+    if (want !== have) throw new Error("The download doesn't match its published checksum. Nothing was installed.");
+  }
+  const scan = await defenderScan(archive);
+  return { archive, scan };
+}
+async function unpackRelease(rel, archive, tmp, send) {
+  const stage = path.join(tmp, 'x');
+  await fsp.mkdir(stage);
+  if (ARCHIVE.test(rel.assetName)) { send({ stage: 'Extracting…', pct: 1 }); await extract(archive, stage); }
+  else await fsp.rename(archive, path.join(stage, rel.assetName));
+  const top = fs.readdirSync(stage, { withFileTypes: true });
+  return top.length === 1 && top[0].isDirectory() ? path.join(stage, top[0].name) : stage;
+}
+// Copy new files over a program folder: the files replaced go to _harbour-backup\<old version>,
+// settings files are kept, and only the newest two backups are left so the folder doesn't grow forever.
+async function installInto(folder, src, oldTag, send) {
+  send({ stage: 'Installing…', pct: 1 });
+  const root = path.join(folder, '_harbour-backup');
+  const backup = path.join(root, (oldTag || 'before-' + new Date().toISOString().slice(0, 10)).replace(/[^\w.-]+/g, '_'));
+  const kept = [];
+  try { await copyUpdate(src, folder, backup, kept); }
+  catch (e) { if (/EBUSY|EPERM|EACCES/.test(e.code || '')) throw new Error('A file is in use or protected. Close the program and try again.'); throw e; }
+  try {
+    const old = fs.readdirSync(root).map(n => ({ p: path.join(root, n), t: fs.statSync(path.join(root, n)).mtimeMs })).sort((a, b) => b.t - a.t).slice(2);
+    for (const o of old) await fsp.rm(o.p, { recursive: true, force: true });
+  } catch {}
+  return { kept, backup: fs.existsSync(backup) ? backup : null };
+}
+// Is a program (by its file name) running right now? Windows only; elsewhere assume not.
+function isRunning(exe) {
+  if (process.platform !== 'win32' || !exe) return false;
+  const r = spawnSync('tasklist', ['/FI', `IMAGENAME eq ${path.basename(exe)}`, '/NH'], { windowsHide: true, encoding: 'utf8' });
+  return (r.stdout || '').toLowerCase().includes(path.basename(exe).toLowerCase());
+}
 const updatingRecomps = new Set();
-async function updateRecomp(gameId, send) {
+async function updateRecomp(gameId, sendRaw) {
   const { game, entry } = recompEntry(gameId);
   if (!entry.source?.repo) throw new Error('Set an update source for this game first.');
   if (updatingRecomps.has(gameId)) throw new Error('Already updating');
-  if (running.has(gameId)) throw new Error('Close the game before updating it.');
+  if (running.has(gameId) || isRunning(entry.executable)) throw new Error('Close the game before updating it.');
+  const send = p => sendRaw({ gameId, ...p });
   updatingRecomps.add(gameId);
   const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'harbour-recomp-'));
   try {
-    send({ gameId, stage: 'Checking latest release…', pct: 0 });
+    send({ stage: 'Checking latest release…', pct: 0 });
     const hit = recompChecks.get(gameId);
     const rel = hit && hit.repo === entry.source.repo && Date.now() - hit.at < 10 * 60 * 1000 && hit.latest?.url ? hit.latest
       : await findRelease(entry.source.repo, { asset: entry.source.asset, prerelease: entry.source.prerelease });
-    const archive = path.join(tmp, rel.assetName);
-    const r = await fetch(rel.url, { headers: { 'User-Agent': UA['User-Agent'] } });
-    if (!r.ok) throw new Error(`Download failed: HTTP ${r.status}`);
-    const total = Number(r.headers.get('content-length')) || rel.size || 0;
-    let got = 0, last = 0;
-    await downloadTo(r, archive, chunk => {
-      got += chunk.length;
-      if (Date.now() - last > 120) { last = Date.now(); send({ gameId, stage: `Downloading ${rel.assetName}`, pct: total ? got / total : 0 }); }
-    });
-    send({ gameId, stage: 'Checking the download…', pct: 1 });
-    if (rel.digest && /^sha256:/i.test(rel.digest)) {
-      const want = rel.digest.slice(7).toLowerCase(), have = await sha256File(archive);
-      if (want !== have) throw new Error("The download doesn't match GitHub's checksum. Nothing was installed.");
-    }
-    const scan = await defenderScan(archive);
-    const stage = path.join(tmp, 'x');
-    await fsp.mkdir(stage);
-    if (ARCHIVE.test(rel.assetName)) { send({ gameId, stage: 'Extracting…', pct: 1 }); await extract(archive, stage); }
-    else await fsp.rename(archive, path.join(stage, rel.assetName));
-    let src = stage;
-    const top = fs.readdirSync(stage, { withFileTypes: true });
-    if (top.length === 1 && top[0].isDirectory()) src = path.join(stage, top[0].name);
-    send({ gameId, stage: 'Installing…', pct: 1 });
-    const label = (entry.installed?.tag || 'before-' + new Date().toISOString().slice(0, 10)).replace(/[^\w.-]+/g, '_');
-    const backup = path.join(entry.path, '_harbour-backup', label);
-    const kept = [];
-    await copyUpdate(src, entry.path, backup, kept);
+    const { archive, scan } = await fetchRelease(rel, tmp, send);
+    const src = await unpackRelease(rel, archive, tmp, send);
+    const { kept, backup } = await installInto(entry.path, src, entry.installed?.tag, send);
     if (entry.executable && !fs.existsSync(entry.executable)) {
       const exe = guessProgram(entry.path, entry.source.repo);
       if (exe) entry.executable = exe;
@@ -954,9 +982,9 @@ async function updateRecomp(gameId, send) {
     entry.installed = { tag: rel.tag, assetId: rel.assetId, date: rel.publishedAt, at: new Date().toISOString() };
     saveConfig(config);
     recompChecks.set(gameId, { at: Date.now(), latest: rel, repo: entry.source.repo }); saveRecompChecks();
-    send({ gameId, stage: 'Done', pct: 1, done: true });
+    send({ stage: 'Done', pct: 1, done: true });
     log(`recomp update ${game.title} -> ${rel.tag} (defender: ${scan}, kept ${kept.length} settings files)`);
-    return { ...recompStatus(entry, rel), backup: fs.existsSync(backup) ? backup : null, kept, scan };
+    return { ...recompStatus(entry, rel), backup, kept, scan };
   } finally {
     updatingRecomps.delete(gameId);
     fsp.rm(tmp, { recursive: true, force: true }).catch(() => {});
@@ -1403,7 +1431,7 @@ async function latestEmulatorRelease(source, prerelease) {
 function emulatorUpdateStatus(e, latest, error) {
   noticeUpdate(e, resolveExe(e.id), latest, i => i.tag !== latest.tag, () => ({ tag: latest.tag }), e.name);
   const installed = e.installed?.tag || null;
-  return { id: e.id, source: e.source || null, installed, latest: latest || null, error: error || null,
+  return { id: e.id, source: e.source || null, installed, latest: latest || null, error: error || null, canInstall: !!e.source && !!resolveExe(e.id),
     updateAvailable: latest && installed ? latest.tag !== installed : null };
 }
 async function checkEmulator(id, force = false) {
@@ -1433,6 +1461,76 @@ handle('harbour:checkEmulators', async force => {
   const out = {};
   await mapLimit(config.customEmulators, 4, async e => { out[e.id] = await checkEmulator(e.id, !!force); });
   return out;
+});
+// ---- Installing emulator updates ----
+// The release with its Windows download. installer: true picks the setup .exe instead of the portable archive.
+async function emulatorDownload(source, { installer = false } = {}) {
+  const pattern = installer ? '(setup|install).*\\.exe$' : source.asset;
+  if (source.type === 'github') return findRelease(source.repo, { asset: pattern, prerelease: source.prerelease });
+  const r = await fetch(`https://${source.host}/api/v1/repos/${source.repo}/releases?limit=10`, { headers: { 'User-Agent': UA['User-Agent'] } });
+  if (!r.ok) throw new Error(`${source.host} ${r.status}`);
+  const re = pattern ? new RegExp(pattern, 'i') : null;
+  for (const rel of (await r.json()).filter(x => !x.draft && (source.prerelease || !x.prerelease))) {
+    const a = re ? rel.assets.find(x => re.test(x.name)) : guessAsset(rel.assets);
+    if (a) return { tag: rel.tag_name, publishedAt: rel.published_at, assetId: a.id, assetName: a.name, size: a.size || 0,
+      url: a.browser_download_url, digest: null, page: rel.html_url || `https://${source.host}/${source.repo}/releases` };
+  }
+  throw new Error(`No Windows download found in the recent releases of ${source.repo}.`);
+}
+// Can Harbour write into this folder? (Program Files can't be written without admin rights.)
+function canWrite(folder) {
+  const probe = path.join(folder, `.harbour-${process.pid}.tmp`);
+  try { fs.writeFileSync(probe, ''); fs.unlinkSync(probe); return true; } catch { return false; }
+}
+// Run a program's own installer with admin rights (one Windows prompt) and silent switches.
+// NSIS installers (like PCSX2's) take /S; Inno Setup ones take /VERYSILENT.
+function runInstallerElevated(file) {
+  const q = s => `'${String(s).replace(/'/g, "''")}'`;
+  const ps = `$p = Start-Process -FilePath ${q(file)} -ArgumentList '/S','/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Verb RunAs -Wait -PassThru; exit $p.ExitCode`;
+  return new Promise((resolve, reject) => {
+    const p = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], { windowsHide: true });
+    let err = ''; p.stderr.on('data', d => (err += d));
+    p.on('error', reject);
+    p.on('close', code => code === 0 ? resolve() : reject(new Error(/canceled|cancelled/i.test(err) ? 'The admin prompt was cancelled. Nothing was installed.' : `The installer stopped (code ${code}).`)));
+  });
+}
+const updatingEmus = new Set();
+handle('harbour:emuUpdate', async id => {
+  const e = config.customEmulators.find(x => x.id === id);
+  const exe = e && resolveExe(id);
+  if (!e?.source) throw new Error('Set where this emulator\'s updates come from first (Updates…).');
+  if (!exe) throw new Error(`Can't find ${e.name}'s program. Choose it again first.`);
+  if (updatingEmus.has(id)) throw new Error('Already updating.');
+  if (running.size || isRunning(exe)) throw new Error(`Close ${e.name} (and any game) before updating it.`);
+  const send = p => win?.webContents.send('recomp:progress', { gameId: 'emu:' + id, ...p });
+  updatingEmus.add(id);
+  const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'harbour-emu-'));
+  try {
+    send({ stage: 'Checking latest release…', pct: 0 });
+    const folder = path.dirname(exe);
+    const viaInstaller = !canWrite(folder);
+    const rel = await emulatorDownload(e.source, { installer: viaInstaller });
+    const { archive, scan } = await fetchRelease(rel, tmp, send);
+    let kept = [];
+    if (viaInstaller) {
+      send({ stage: 'Installing (approve the Windows prompt)…', pct: 1 });
+      await runInstallerElevated(archive);
+    } else {
+      const src = await unpackRelease(rel, archive, tmp, send);
+      ({ kept } = await installInto(folder, src, e.installed?.tag, send));
+    }
+    if (!fs.existsSync(exe)) throw new Error(`${path.basename(exe)} is gone after the update. Choose the program again in Emulators.`);
+    e.installed = { tag: rel.tag, stamp: fileStamp(exe)?.id };
+    saveConfig(config);
+    const latest = { tag: rel.tag, date: (rel.publishedAt || '').slice(0, 10), published: rel.publishedAt, page: rel.page };
+    recompChecks.set('emu:' + id, { at: Date.now(), latest, repo: JSON.stringify(e.source) }); saveRecompChecks();
+    send({ stage: 'Done', pct: 1, done: true });
+    log(`emulator update ${e.name} -> ${rel.tag} (${rel.assetName}, ${viaInstaller ? 'installer' : 'copied'}, defender: ${scan}, kept ${kept.length} settings files)`);
+    return emulatorUpdateStatus(e, latest);
+  } finally {
+    updatingEmus.delete(id);
+    fsp.rm(tmp, { recursive: true, force: true }).catch(() => {});
+  }
 });
 handle('harbour:openEmulatorPage', async id => {
   const e = config.customEmulators.find(x => x.id === id);
