@@ -141,7 +141,8 @@ function pendingUpdates() {
     .filter(u => u.g).map(u => ({ ...u, name: u.g.title, from: u.s.installed?.tag, to: u.s.latest?.tag, auto: !!u.s.auto }));
   const emus = Object.entries(S.emuStatus || {}).filter(([, s]) => s.updateAvailable)
     .map(([id, s]) => ({ kind: 'emu', id, s, name: (S.emus || []).find(e => e.id === id)?.name || id, from: s.installed, to: s.latest?.tag, auto: !!s.canInstall }));
-  return [...games, ...emus];
+  // Ones Harbour can install first, "update in app" ones last (sort keeps the order within each group).
+  return [...games, ...emus].sort((a, b) => Number(b.auto) - Number(a.auto));
 }
 function openUpdates() { UISound.play('open'); renderUpdates(); if (!$('#updatesDlg').open) $('#updatesDlg').showModal(); }
 function renderUpdates() {
