@@ -84,7 +84,7 @@
 
   <!-- Your emulators, and which one each console uses -->
   <dialog id="emusDlg">
-    <h2>Emulators &amp; game folders</h2>
+    <div class="dlg-head"><h2>Emulators &amp; game folders</h2><button id="emusAdd" type="button" class="primary">＋ Add emulators</button></div>
     <h3>Which emulator each console uses</h3>
     <div id="emuConsoles" class="emu-consoles"></div>
     <h3>Game folders</h3>
@@ -96,7 +96,7 @@
     </div>
     <h3>Your emulators</h3>
     <div id="emuCards" class="emu-cards"></div>
-    <div class="dlg-actions"><button id="emusAdd">＋ Add emulators</button><button id="emusClose" class="primary">Done</button></div>
+    <div class="dlg-actions"><button id="emusClose" class="primary">Done</button></div>
   </dialog>
 
   <!-- Add a game or an emulator: one question at a time -->

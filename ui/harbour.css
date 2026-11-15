@@ -165,6 +165,9 @@ body.frozen *, body.frozen *::before, body.frozen *::after { animation-play-stat
 
 /* Emulators screen */
 #emusDlg { width: min(calc(980 * var(--u)), 92vw); max-height: 88vh; overflow-x: hidden; }
+.dlg-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: calc(18 * var(--u)); }
+.dlg-head h2 { margin: 0; }
+.emu-console small.need { color: var(--beam); font-weight: 600; }  /* games here, but no emulator to play them */
 #emusDlg h3 { margin: calc(18 * var(--u)) 0 calc(10 * var(--u)); font-size: calc(17 * var(--u)); color: var(--muted); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
 .emu-consoles { display: grid; gap: calc(8 * var(--u)); }
 /* Same columns on every row, so the dropdowns line up whether or not a row has an Install button. */

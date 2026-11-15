@@ -512,6 +512,9 @@ async function renderEmulators() {
     const needOne = S.games.some(g => g.system === s.id && !g.recomp);
     const offer = needOne && !pick.value && catalog.find(c => c.consoles.includes(s.id) && !c.installed);
     if (offer) {
+      // Say why the button is there: these games can't start until it's installed.
+      label.querySelector('small')?.remove();
+      label.append(el('small', 'need', ` · ${counts[s.id]} game${counts[s.id] === 1 ? '' : 's'}, no emulator`));
       const b = el('button', 'primary', `Install ${offer.name}`); b.type = 'button';
       b.onclick = async () => { await installEmulator(offer, b); renderEmulators(); };
       row.append(b);
