@@ -167,8 +167,9 @@ function renderUpdates() {
     if (u.auto) {
       // Its button shows when it's waiting in the queue, and how far it is while it runs.
       const key = `update:${u.kind}:${u.id}`, st = jobState(key), pct = st === 'running' ? Q.cur.pct : 0;
-      const x = b(st === 'running' ? (pct > 0 && pct < 1 ? `${Math.round(pct * 100)}%` : 'Updating…') : st === 'queued' ? 'Queued' : 'Update', () => updateOne(u), st ? 'primary busy' : 'primary');
-      x.dataset.key = key; x.disabled = !!st;
+      const x = b('Update', () => updateOne(u), 'primary');
+      x.dataset.key = key;
+      if (st) spinnerButton(x, st === 'running' ? 'Updating' : 'Queued', pct);
     } else {
       // Harbour can't install this one: say where to update it. It notices by itself once it's done.
       name.append(el('small', 'upd-how', 'Update in app'));
@@ -496,7 +497,8 @@ async function renderEmulators() {
     const offer = !busy && needOne && !pick.value && catalog.find(c => c.consoles.includes(s.id) && !c.installed);
     if (busy) {
       // Being installed (or waiting its turn): it leaves the list again if the install fails and there are no games.
-      const b = el('button', 'busy', installState(busy.id) === 'installing' ? `Installing ${busy.name}…` : `${busy.name}: queued`); b.type = 'button'; b.disabled = true;
+      const b = el('button'); b.type = 'button';
+      spinnerButton(b, installState(busy.id) === 'installing' ? `Installing ${busy.name}` : `${busy.name}: queued`, installState(busy.id) === 'installing' ? Q.cur?.pct : 0);
       row.append(b);
     }
     if (offer) {
@@ -933,7 +935,9 @@ async function init() {
   api.onRecompProgress?.(p => {
     if (p.done) return;
     // Installs and updates run one at a time, so this is the running queue job's progress.
-    if (Q.cur) jobProgress(/download/i.test(p.stage) || !p.stage ? Q.cur.label : `${Q.cur.label} · ${p.stage}`, p.pct);
+    // The stage is left out when it only repeats the job ("Installing X" · "Installing…") or is the download itself.
+    const first = s => String(s).toLowerCase().split(/[^a-z]/)[0];
+    if (Q.cur) jobProgress(!p.stage || /download/i.test(p.stage) || first(p.stage) === first(Q.cur.label) ? Q.cur.label : `${Q.cur.label} · ${p.stage}`, p.pct);
   });
   setFrozen();
 }
@@ -1017,13 +1021,19 @@ async function pumpQueue() {
   }
   queueChanged(); pumpQueue();
 }
+// A button whose job is waiting or running: a spinning circle in place of its words (and how far, once it's going).
+function spinnerButton(btn, label, pct = 0) {
+  btn.classList.add('waiting'); btn.disabled = true; btn.title = label; btn.setAttribute('aria-label', label);
+  btn.replaceChildren(el('span', 'spinner'), ...(pct > 0 && pct < 1 ? [`${Math.round(pct * 100)}%`] : []));
+}
 // How far the running job is: the badge, and its button in the Updates window.
 function jobProgress(text, pct = 0) {
   if (!Q.cur) return;
   Q.cur.text = text; Q.cur.pct = pct;
   showQueueBadge();
   const btn = document.querySelector(`#updList button[data-key="${Q.cur.key}"]`);
-  if (btn) btn.textContent = pct > 0 && pct < 1 ? `${Math.round(pct * 100)}%` : 'Updating…';
+  if (btn) spinnerButton(btn, 'Updating', pct);
+  if (Q.cur.c) document.querySelectorAll(`#emuCatalog button[data-id="${Q.cur.c.id}"]`).forEach(catalogButton);
 }
 function showQueueBadge() {
   const j = Q.cur; if (!j) return;
@@ -1063,8 +1073,9 @@ const installState = id => ({ running: 'installing', queued: 'queued' })[jobStat
 const installsPending = () => [Q.cur, ...Q.list].filter(j => j?.c).map(j => j.c);
 function catalogButton(btn) {
   const st = btn.dataset.installed ? 'installed' : installState(btn.dataset.id);
-  btn.className = st ? (st === 'installed' ? '' : 'busy') : 'primary';
-  btn.textContent = { installed: 'Installed', installing: 'Installing…', queued: 'Queued' }[st] || 'Install';
+  btn.className = st ? '' : 'primary'; btn.removeAttribute('title');
+  if (st === 'installing' || st === 'queued') return spinnerButton(btn, st === 'installing' ? 'Installing' : 'Queued', st === 'installing' ? Q.cur?.pct : 0);
+  btn.textContent = st === 'installed' ? 'Installed' : 'Install';
   btn.disabled = !!st;
 }
 // From the install list back to your emulators (Manage), and the other way with "＋ Add emulators".
