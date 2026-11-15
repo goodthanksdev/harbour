@@ -1106,6 +1106,7 @@ async function updateRecomp(gameId, sendRaw) {
     const root = entry.executable ? placeRelease(src, entry.executable) : entry.path;
     if (!root) throw updatesWithOwnTool(entry.source, game.title);
     const { kept, backup } = await installInto(root, src, entry.installed?.tag, send);
+    if (inPortsDir(entry.path) && path.resolve(root) === path.resolve(entry.path)) await rememberRelease(entry.id, src);
     if (entry.executable && !fs.existsSync(entry.executable)) {
       const exe = guessProgram(root, entry.source.repo);
       if (exe) entry.executable = exe;
@@ -1830,6 +1831,7 @@ handle('harbour:installPort', async ({ repo: link, rom, title, platform }) => {
     await fsp.cp(src, folder, { recursive: true });
     const exe = findGameExe(folder) || guessProgram(folder, repo);
     if (!exe) { await fsp.rm(folder, { recursive: true, force: true }); throw notReady(); }
+    const restored = await restoreSaves(repo, folder);
     if (rom) await fsp.copyFile(rom, path.join(path.dirname(exe), path.basename(rom)));
     const installed = { tag: rel.tag, assetId: rel.assetId, date: rel.publishedAt, uploader: rel.uploader || undefined };
     // From the catalogue the name and console are known; otherwise Harbour works them out.
@@ -1838,7 +1840,8 @@ handle('harbour:installPort', async ({ repo: link, rom, title, platform }) => {
     const entry = { id: randomUUID().slice(0, 8), system: 'recomp', path: folder, title: found.title, executable: exe,
       platform: found.platform || undefined, source: { repo, prerelease: false }, installed };
     config.extraGames.push(entry); saveConfig(config);
-    log(`installed port ${repo} ${rel.tag} (${rel.assetName}, defender: ${scan}) to ${folder} as ${found.title} [${found.platform || 'recomp'}]${rom ? ' with ' + path.basename(rom) : ''}`);
+    await rememberRelease(entry.id, src);
+    log(`installed port ${repo} ${rel.tag} (${rel.assetName}, defender: ${scan}) to ${folder} as ${found.title} [${found.platform || 'recomp'}]${rom ? ' with ' + path.basename(rom) : ''}${restored ? `, ${restored} saved files brought back` : ''}`);
     send({ stage: 'Done', pct: 1, done: true });
     return entry;
   } finally {
@@ -2203,8 +2206,69 @@ handle('harbour:setSystemEmulator', ({ system, emulator }) => {
   sys.emulator = emulator || ''; saveConfig(config);
   return true;
 });
-// "Undock and delete": only for a port Harbour installed into its own Ports folder (its folder goes, saves kept in it
-// too). Ports you installed yourself are never deleted by Harbour; they can only be undocked.
+// ---- Saves of ports Harbour installs ----
+// Harbour remembers which files came in a port's download (data\ports\<id>.json). Deleting the port first copies
+// everything else in its folder (saves, settings, mods you added) to data\Saves\<project>\<date>, and installing
+// the same project again brings the newest copy back. Left out: big files the port rebuilds by itself (extracted
+// game data, shader caches), logs, programs, and your game file (you still have the original).
+const SAVES_DIR = path.join(DATA, 'Saves');
+const manifestFile = id => path.join(DATA, 'ports', `${id}.json`);
+const savesName = repo => String(repo || 'port').split('/').pop().replace(/[<>:"|?*\\/]/g, '');
+async function filesIn(dir, base = dir, out = []) {
+  for (const e of await fsp.readdir(dir, { withFileTypes: true }).catch(() => [])) {
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) await filesIn(p, base, out); else out.push(path.relative(base, p).split(path.sep).join('/'));
+  }
+  return out;
+}
+// Each downloaded file with its size, so a settings file that came with it but you changed counts as yours too.
+async function rememberRelease(id, dir) {
+  let known = {};
+  try { const j = JSON.parse(await fsp.readFile(manifestFile(id), 'utf8')); if (!Array.isArray(j)) known = j; } catch {}
+  for (const rel of await filesIn(dir)) { try { known[rel.toLowerCase()] = (await fsp.stat(path.join(dir, rel))).size; } catch {} }
+  await fsp.mkdir(path.dirname(manifestFile(id)), { recursive: true });
+  await fsp.writeFile(manifestFile(id), JSON.stringify(known));
+}
+// What came in the download: the list Harbour kept, or (for ports installed before it kept one) the release's zip.
+async function releaseFilesOf(entry) {
+  try { return new Map(Object.entries(JSON.parse(await fsp.readFile(manifestFile(entry.id), 'utf8')))); } catch {}
+  try {
+    const rel = await findRelease(entry.source.repo, { asset: entry.source.asset, prerelease: entry.source.prerelease });
+    const all = await remoteZipNames(rel.url), names = all?.filter(n => !n.endsWith('/'));
+    if (!names?.length) return null;
+    const top = names[0].split('/')[0] + '/';  // a zip holding one folder: it was unpacked without it
+    const strip = names.every(m => m.startsWith(top));
+    return new Map(names.map(n => [(strip ? n.slice(top.length) : n).toLowerCase(), all.sizes.get(n) ?? null]));
+  } catch { return null; }
+}
+// "2026-11-15 21-40": your own clock's date and time, sortable, safe in a folder name.
+const localStamp = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}-${String(d.getMinutes()).padStart(2, '0')}`;
+async function keepSaves(entry) {
+  const release = await releaseFilesOf(entry), gameExts = new Set(GAME_FILE_EXTS.map(e => '.' + e));
+  const keep = [];
+  for (const rel of await filesIn(entry.path)) {
+    const lower = rel.toLowerCase(), file = path.join(entry.path, rel);
+    let size; try { size = (await fsp.stat(file)).size; } catch { continue; }
+    if (release?.has(lower) && (release.get(lower) == null || release.get(lower) === size)) continue;  // came with it, unchanged
+    if (/^logs?\//.test(lower) || /(^|\/)(shader|pipeline)[^/]*cache/.test(lower) || /\.(exe|dll|log)$/.test(lower) || gameExts.has(path.extname(lower))) continue;
+    if (size > 20 * 1048576) continue;
+    keep.push(rel);
+  }
+  if (!keep.length) return { count: 0 };
+  const dir = path.join(SAVES_DIR, savesName(entry.source?.repo || path.basename(entry.path)), localStamp());
+  for (const rel of keep) { const to = path.join(dir, rel); await fsp.mkdir(path.dirname(to), { recursive: true }); await fsp.copyFile(path.join(entry.path, rel), to); }
+  return { count: keep.length, dir };
+}
+async function restoreSaves(repo, folder) {
+  const root = path.join(SAVES_DIR, savesName(repo));
+  const latest = (await fsp.readdir(root).catch(() => [])).sort().pop();
+  if (!latest) return 0;
+  const files = await filesIn(path.join(root, latest));
+  await fsp.cp(path.join(root, latest), folder, { recursive: true, force: false, errorOnExist: false });
+  return files.length;
+}
+// "Undock and delete": only for a port Harbour installed into its own Ports folder (its saves are kept first, see
+// above). Ports you installed yourself are never deleted by Harbour; they can only be undocked.
 const inPortsDir = p => { if (!p) return false; const rel = path.relative(PORTS_DIR, path.resolve(p)); return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel) && !rel.includes(path.sep); };
 handle('game:delete', async gameId => {
   const game = libraryGames.find(g => g.id === gameId && g.recomp);
@@ -2212,13 +2276,15 @@ handle('game:delete', async gameId => {
   if (!entry) throw new Error('Select a PC port first.');
   if (!inPortsDir(entry.path)) throw new Error('Harbour only deletes ports it installed itself. Undock this one instead.');
   if (running.has(gameId) || isRunning(entry.executable)) throw new Error('Close the game first.');
+  const saved = await keepSaves(entry);
   try { await fsp.rm(entry.path, { recursive: true, force: true }); }
   catch (e) { throw new Error(/EBUSY|EPERM/.test(e.code || '') ? 'A file in it is in use. Close the game and try again.' : e.message); }
   config.extraGames = config.extraGames.filter(x => x.id !== entry.id); saveConfig(config);
   delete libraryState.hidden[gameId]; saveState();
   recompChecks.delete(gameId); saveRecompChecks();
-  log(`deleted port ${entry.title} (${entry.path})`);
-  return true;
+  await fsp.rm(manifestFile(entry.id), { force: true });
+  log(`deleted port ${entry.title} (${entry.path}), kept ${saved.count} saved files${saved.dir ? ' in ' + saved.dir : ''}`);
+  return { kept: saved.count };
 });
 handle('game:remove', id => {
   config.extraGames = config.extraGames.filter(x => x.id !== id);
