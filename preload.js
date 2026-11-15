@@ -33,6 +33,7 @@ contextBridge.exposeInMainWorld('api', {
   pickPort: () => call('harbour:pickPort'),
   detectPort: options => call('harbour:detectPort', options),
   gameRemove: id => call('game:remove', id),
+  gameDelete: id => call('game:delete', id),
   addPort: options => call('harbour:addPort', options),
   installPort: options => call('harbour:installPort', options),
   portCatalog: () => call('harbour:portCatalog'),

@@ -516,6 +516,7 @@ async function scanFolders(folderReport, listings) {
         title: meta.title || displayTitle(base),
         ...(f.added ? { added: f.added } : {}),
         ...(f.recomp ? { recomp: true } : {}),
+        ...(f.recomp && inPortsDir(config.extraGames.find(x => x.id === f.added)?.path) ? { deletable: true } : {}),
         ...(f.discs ? { discs: f.discs.map(d => d.n), discPaths: f.discs.map(d => d.path) } : {}),
         ...(shell && /^#[0-9a-f]{6}$/i.test(shell) ? { shell } : {}),
         info: meta,
@@ -577,7 +578,7 @@ function presentLibrary(games) {
   }
   // A PC port beats a ROM of the same game on the same shelf: the ROM in a games folder (often the
   // very file the port was built from) stays out of sight.
-  const ports = new Set(games.filter(g => g.recomp).map(g => g.system + '|' + looseKey(g.title)));
+  const ports = new Set(games.filter(g => g.recomp && !gameState(g.id).hidden).map(g => g.system + '|' + looseKey(g.title)));
   games = games.filter(g => g.recomp || !ports.has(g.system + '|' + looseKey(g.title)));
   const compareTitles = new Intl.Collator(undefined, { sensitivity: 'base' }).compare;
   games.sort((a, b) => compareTitles(a.title, b.title));
@@ -2200,6 +2201,23 @@ handle('harbour:setSystemEmulator', ({ system, emulator }) => {
   if (!sys) throw new Error('Unknown console.');
   if (emulator && !emuDef(emulator)) throw new Error('That emulator is not set up.');
   sys.emulator = emulator || ''; saveConfig(config);
+  return true;
+});
+// "Undock and delete": only for a port Harbour installed into its own Ports folder (its folder goes, saves kept in it
+// too). Ports you installed yourself are never deleted by Harbour; they can only be undocked.
+const inPortsDir = p => { if (!p) return false; const rel = path.relative(PORTS_DIR, path.resolve(p)); return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel) && !rel.includes(path.sep); };
+handle('game:delete', async gameId => {
+  const game = libraryGames.find(g => g.id === gameId && g.recomp);
+  const entry = game && config.extraGames.find(x => x.id === game.added);
+  if (!entry) throw new Error('Select a PC port first.');
+  if (!inPortsDir(entry.path)) throw new Error('Harbour only deletes ports it installed itself. Undock this one instead.');
+  if (running.has(gameId) || isRunning(entry.executable)) throw new Error('Close the game first.');
+  try { await fsp.rm(entry.path, { recursive: true, force: true }); }
+  catch (e) { throw new Error(/EBUSY|EPERM/.test(e.code || '') ? 'A file in it is in use. Close the game and try again.' : e.message); }
+  config.extraGames = config.extraGames.filter(x => x.id !== entry.id); saveConfig(config);
+  delete libraryState.hidden[gameId]; saveState();
+  recompChecks.delete(gameId); saveRecompChecks();
+  log(`deleted port ${entry.title} (${entry.path})`);
   return true;
 });
 handle('game:remove', id => {

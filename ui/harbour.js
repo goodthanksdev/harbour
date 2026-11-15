@@ -148,7 +148,7 @@ function renderRow() {
 // ---------- updates: recomps and emulators in one list ----------
 function pendingUpdates() {
   const games = Object.entries(S.recomp).filter(([, s]) => s.updateAvailable).map(([id, s]) => ({ kind: 'game', id, s, g: S.games.find(g => g.id === id) }))
-    .filter(u => u.g).map(u => ({ ...u, name: u.g.title, from: u.s.installed?.tag, to: u.s.latest?.tag, auto: !!u.s.auto }));
+    .filter(u => u.g && !u.g.hidden).map(u => ({ ...u, name: u.g.title, from: u.s.installed?.tag, to: u.s.latest?.tag, auto: !!u.s.auto }));
   const emus = Object.entries(S.emuStatus || {}).filter(([, s]) => s.updateAvailable)
     .map(([id, s]) => ({ kind: 'emu', id, s, name: (S.emus || []).find(e => e.id === id)?.name || id, from: s.installed, to: s.latest?.tag, auto: !!s.canInstall }));
   // Ones Harbour can install first, "update in app" ones last (sort keeps the order within each group).
@@ -350,12 +350,13 @@ function openMenu(anchor) {
     add('🎲 Different clip', () => downloadVideos('game', g.id, 'reroll'));
     add('🎲 Change video', () => downloadVideos('game', g.id, 'new'));
   } else if (videosOn()) add('Get a video for this game', () => downloadVideos('game', g.id, 'missing'));
-  // A PC port you added can be taken out again (its files stay); a game from a games folder can be hidden.
-  if (g.recomp) add('Undock from Harbour', async () => {
-    if (!confirm(`Undock ${g.title} from Harbour? Its files stay where they are.`)) return;
-    try { await api.gameRemove(g.added); await reload(); toast(`${g.title} undocked.`); } catch (e) { toast(e.message); }
+  // Undock: off the shelves, everything kept (Settings → Undocked games redocks it). A port Harbour installed itself
+  // can also be deleted, folder and all.
+  add('Undock from Harbour', async () => { await api.setHidden({ gameId: g.id, hidden: true }); g.hidden = true; buildTabs(); setTab(S.tab); afterUpdates(); toast(`${g.title} undocked. Settings can redock it.`, 4000); });
+  if (g.deletable) add('Undock and delete', async () => {
+    if (!confirm(`Delete ${g.title}? Its folder in Ports goes too, with any saves kept there.`)) return;
+    try { await api.gameDelete(g.id); await reload(); afterUpdates(); toast(`${g.title} deleted.`); } catch (e) { UISound.play('error'); toast(e.message, 6000); }
   });
-  else add('Hide from Harbour', async () => { await api.setHidden({ gameId: g.id, hidden: true }); g.hidden = true; buildTabs(); setTab(S.tab); toast(`${g.title} hidden. Settings can show it again.`, 4000); });
   const r = anchor.getBoundingClientRect();
   m.hidden = false; S.menuOpen = true;
   m.style.left = Math.min(r.left, innerWidth - m.offsetWidth - 16) + 'px';
@@ -712,7 +713,7 @@ $('#renameForm').addEventListener('submit', async e => {
 // ---------- settings ----------
 function openSettings() {
   const hidden = S.games.filter(g => g.hidden).length;
-  $('#setUnhide').textContent = hidden ? `Show (${hidden})` : 'None';
+  $('#setUnhide').textContent = hidden ? `Redock (${hidden})` : 'None';
   $('#setUnhide').disabled = !hidden;
   $('#setIdle').value = String(S.config.harbourIdle ?? 120);
   $('#setVideosOn').value = videosOn() ? '1' : '0';
@@ -758,7 +759,7 @@ $('#setVidVol').oninput = e => setVideoSlider(Number(e.target.value), false);
 $('#setVidVol').onchange = e => setVideoSlider(Number(e.target.value), true);
 $('#setUnhide').onclick = async () => {
   for (const g of S.games.filter(x => x.hidden)) { await api.setHidden({ gameId: g.id, hidden: false }).catch(() => {}); g.hidden = false; }
-  $('#settings').close(); buildTabs(); setTab(S.tab, true); toast('Hidden games are back.');
+  $('#settings').close(); buildTabs(); setTab(S.tab, true); afterUpdates(); toast('Undocked games are back.');
 };
 $('#setCheck').onclick = () => { $('#settings').close(); checkUpdates(true); };
 // Artwork and clips download by themselves (autoMedia), so there are no buttons for them.
