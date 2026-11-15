@@ -371,6 +371,35 @@ function switchTitleId(name) {
 }
 // Updates and DLC join the game they belong to instead of each becoming a game of their own.
 const switchGroup = name => switchTitleId(name)?.base || '';
+// A file's title ID: from its name ("[0100…]"), else from inside it (f.tid, read during the scan).
+const fileTitleId = f => switchTitleId(f.name) || (f.tid ? switchTitleId(`[${f.tid}]`) : null);
+// The title ID inside a Switch game whose name doesn't carry one: a dump folder's exefs/main.npdm (ACI0 block), or an
+// NSP/NSZ's ticket ("<title id><key gen>.tik" in its file table). Copies of one game then become one entry, however
+// they're named ("Mario Odyssey.nsp" and a "SMO-1.0.0" dump folder).
+async function innerTitleId(f) {
+  try {
+    if (f.dump) {
+      const b = await fsp.readFile(path.join(path.dirname(f.path), 'main.npdm'));
+      if (b.toString('latin1', 0, 4) !== 'META') return null;
+      const aci = b.readUInt32LE(0x70);
+      return b.toString('latin1', aci, aci + 4) === 'ACI0' ? b.readBigUInt64LE(aci + 0x10).toString(16).padStart(16, '0') : null;
+    }
+    if (!/\.(nsp|nsz)$/i.test(f.name)) return null;
+    const fh = await fsp.open(f.path, 'r');
+    try {
+      const b = Buffer.alloc(0x8000);
+      await fh.read(b, 0, b.length, 0);
+      if (b.toString('latin1', 0, 4) !== 'PFS0') return null;
+      const count = b.readUInt32LE(4), names = 0x10 + count * 0x18;
+      for (let i = 0; i < count && names < b.length; i++) {
+        const start = names + b.readUInt32LE(0x10 + i * 0x18 + 0x10), end = b.indexOf(0, start);
+        const m = b.toString('latin1', start, end).match(/^([0-9a-f]{16})[0-9a-f]{16}\.tik$/i);
+        if (m) return m[1].toLowerCase();
+      }
+    } finally { await fh.close(); }
+  } catch {}
+  return null;
+}
 
 // When the same game appears more than once, keep the best copy.
 function copyScore(f, titleIds) {
@@ -382,7 +411,8 @@ function copyScore(f, titleIds) {
   if (/\b(update|upd|dlc)\b|\[v[1-9]\d*\]|\(beta|\(proto|\(demo|\(hack|\[(b|h|t|o)\d*\]/i.test(n)) s -= 6;
   if (!/\.zip$/i.test(n)) s += 1;
   // Switch: the game itself is what you launch, so it beats its own update and DLC files.
-  if (titleIds) { const id = switchTitleId(n); if (id) s += id.part === 0 ? 8 : -8; }
+  if (titleIds) { const id = fileTitleId(f); if (id) s += id.part === 0 ? 8 : -8; }
+  if (f.dump) s -= 1;  // a properly named file of the same game names it better than a dump folder ("SMO-1.0.0")
   return s;
 }
 
@@ -455,6 +485,7 @@ async function scanFolders(folderReport, listings) {
     const m3u = new Set(files.filter(f => /\.m3u$/i.test(f.name)).map(f => looseKey(stem(f.name))));
     // Switch-style libraries group by title ID, so an update or a DLC pack never becomes its own game.
     const titleIds = ['.nsp', '.xci', '.nsz', '.xcz'].some(e => exts.includes(e));
+    if (titleIds) await mapLimit(files.filter(f => !f.added && !TITLE_ID.test(f.name)), SCAN_CONCURRENCY, async f => { f.tid = await innerTitleId(f); });
     // Keep every copy that shares the top score; only those ties need their file sizes read,
     // and those reads all run together.
     const tops = new Map();
@@ -463,7 +494,7 @@ async function scanFolders(folderReport, listings) {
       const base = f.recomp ? f.name : f.added && f.title ? f.title.replace(/[<>:"/\\|?*\x00-\x1f]+/g, ' ').replace(/\s+/g, ' ').trim() : path.basename(f.name, path.extname(f.name));
       if (!/\.m3u$/i.test(f.name) && /\(disc \d+\)/i.test(base) && m3u.has(looseKey(base))) continue;
       // Games added one by one are always their own game (two Switch folder dumps are both called "main").
-      const key = f.added ? f.added : (titleIds && switchGroup(base)) || looseKey(base) || base.toLowerCase();
+      const key = f.added ? f.added : (titleIds && fileTitleId(f)?.base) || looseKey(base) || base.toLowerCase();
       if (f.score !== Infinity) f.score = copyScore(f, titleIds);
       const top = tops.get(key);
       if (!top || top[0].score < f.score) tops.set(key, [f]);
@@ -478,7 +509,7 @@ async function scanFolders(folderReport, listings) {
       for (const f of top.slice(1)) if (pick.score !== Infinity && await copySize(pick) < await copySize(f)) pick = f;
       // An update or DLC file is never a game of its own: when its base game's file is there it was
       // grouped with it above; when it isn't (or the base file's name has no title ID), it's left out.
-      if (titleIds && !pick.added && (switchTitleId(pick.name)?.part || 0) !== 0) continue;
+      if (titleIds && !pick.added && (fileTitleId(pick)?.part || 0) !== 0) continue;
       best.set(key, pick);
     }
     const roots = [...extras.filter(x => x.system === 'recomp').flatMap(x => [path.join(x.path, 'media'), x.path]), config.mediaRoot && path.join(config.mediaRoot, sys.id), ...scannedDirs.flatMap(d => [path.join(d, 'media'), d]), path.join(DATA, 'media', sys.id)].filter(Boolean);
