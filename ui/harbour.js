@@ -294,6 +294,7 @@ function showGame(g) {
   // No emulator for this console yet: the Play button installs one instead.
   const offer = emuOffer(g), playBtn = $('#btnPlay');
   if (!S.installingFor) playBtn.replaceChildren(...(offer ? [`Install ${offer.name}`] : [el('span', 'tri'), 'Play']));
+  const hint = $('#hints span'); if (hint?.lastChild) hint.lastChild.textContent = offer ? 'Install' : 'Play';
   const up = $('#btnUpdate');
   up.hidden = !st?.updateAvailable; up.className = 'new';
   up.textContent = st?.updateAvailable ? (st.auto ? `⬆ Update to ${st.latest.tag}` : `${st.latest.tag}: update in app`) : '';
