@@ -354,8 +354,8 @@ function openMenu(anchor) {
   // can also be deleted, folder and all.
   add('Undock from Harbour', async () => { await api.setHidden({ gameId: g.id, hidden: true }); g.hidden = true; buildTabs(); setTab(S.tab); afterUpdates(); toast(`${g.title} undocked. Settings can redock it.`, 4000); });
   if (g.deletable) add('Undock and delete', async () => {
-    if (!confirm(`Delete ${g.title}? Its saves and settings are kept, and come back if you install it again.`)) return;
-    try { const r = await api.gameDelete(g.id); await reload(); afterUpdates(); toast(`${g.title} deleted.` + (r?.kept ? ' Saves kept.' : ''), 5000); } catch (e) { UISound.play('error'); toast(e.message, 6000); }
+    if (!confirm(`Delete ${g.title}? Only what was installed goes: your saves and mods stay in its folder, ready if you install it again.`)) return;
+    try { const r = await api.gameDelete(g.id); await reload(); afterUpdates(); toast(`${g.title} deleted.` + (r?.kept ? ' Your saves stayed.' : ''), 5000); } catch (e) { UISound.play('error'); toast(e.message, 6000); }
   });
   const r = anchor.getBoundingClientRect();
   m.hidden = false; S.menuOpen = true;
