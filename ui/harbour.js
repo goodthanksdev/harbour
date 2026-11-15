@@ -344,7 +344,7 @@ function openMenu(anchor) {
   // clip = another part of the same video; video = a different video.
   add('🎲 Change cover art', () => downloadArt('game', g.id, [g.media?.fanart || !g.media?.screenshot ? 'fanart' : 'screenshot']));
   if (g.media?.video) {
-    add('🎲 Change clip', () => downloadVideos('game', g.id, 'reroll'));
+    add('🎲 Different clip', () => downloadVideos('game', g.id, 'reroll'));
     add('🎲 Change video', () => downloadVideos('game', g.id, 'new'));
   } else add('Get a video for this game', () => downloadVideos('game', g.id, 'missing'));
   // A PC port you added can be taken out again (its files stay); a game from a games folder can be hidden.
