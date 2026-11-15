@@ -340,8 +340,9 @@ function openMenu(anchor) {
   }
   add('Rename…', () => openRename(g));
   add('Open game folder', () => api.openGameFolder(g.id).catch(e => toast(e.message)));
-  // 🎲: artwork = the next of the database's pictures; clip = another part of the same video; video = a different video.
-  add('🎲 Change artwork', () => downloadArt('game', g.id, true));
+  // 🎲: cover art = the next of the database's backgrounds (the big picture behind the game; the box cover stays);
+  // clip = another part of the same video; video = a different video.
+  add('🎲 Change cover art', () => downloadArt('game', g.id, [g.media?.fanart || !g.media?.screenshot ? 'fanart' : 'screenshot']));
   if (g.media?.video) {
     add('🎲 Change clip', () => downloadVideos('game', g.id, 'reroll'));
     add('🎲 Change video', () => downloadVideos('game', g.id, 'new'));
@@ -701,10 +702,11 @@ api.onVideoProgress?.(job => {
   const finish = mainJob.video; mainJob.video = null;
   reload().then(() => { startVideoSoon(S.list[S.sel]); finish?.(result); });
 });
-function downloadArt(scope, gameId, reroll = false) {
-  return enqueue(`art:${scope}:${gameId || ''}${reroll ? ':next' : ''}`, reroll ? 'Changing artwork' : 'Artwork', () => new Promise((resolve, reject) => {
-    S.artBusy = true; S.artReroll = reroll; mainJob.art = resolve;
-    api.artStart({ scope, gameId, types: ['front', 'fanart', 'logo', 'screenshot'], retryMissing: true, upgrade: false, reroll })
+// reroll: the kinds to swap for the next of the database's pictures (else missing pictures are downloaded).
+function downloadArt(scope, gameId, reroll = null) {
+  return enqueue(`art:${scope}:${gameId || ''}${reroll ? ':next' : ''}`, reroll ? 'Changing cover art' : 'Artwork', () => new Promise((resolve, reject) => {
+    S.artBusy = true; S.artReroll = !!reroll; mainJob.art = resolve;
+    api.artStart({ scope, gameId, types: reroll || ['front', 'fanart', 'logo', 'screenshot'], retryMissing: true, upgrade: false, reroll: !!reroll })
       .catch(e => { S.artBusy = false; mainJob.art = null; reject(e); });
   }));
 }
@@ -714,7 +716,7 @@ api.onArtProgress?.(job => {
   const finish = mainJob.art; mainJob.art = null; S.artBusy = false;
   // Changed pictures keep their file names: a new ?v= makes the window load them again instead of its cached copies.
   if (S.artReroll) S.artBust = Date.now();
-  const msg = S.artReroll ? (job.downloaded ? 'New artwork' : 'No other artwork for this game') : `Artwork done: ${job.downloaded} new image${job.downloaded === 1 ? '' : 's'}`;
+  const msg = S.artReroll ? (job.downloaded ? 'New cover art' : 'No other cover art for this game') : `Artwork done: ${job.downloaded} new image${job.downloaded === 1 ? '' : 's'}`;
   reload().then(() => finish?.(S.artReroll && !job.downloaded ? { fail: msg } : { done: msg }));
 });
 
