@@ -294,9 +294,9 @@ function showGame(g) {
   // A PC port of this game exists (the catalogue, same game and console): say so, next to Play. Otherwise nothing.
   // It says how well the best of them runs, so "Experimental" tells you not to bother yet.
   const ports = portsFor(g), best = ports.map(x => x.status).sort((a, b) => (TIER[a] ?? 3) - (TIER[b] ?? 3))[0];
-  $('#btnPort').hidden = !ports.length;
-  // Small, in brackets, in the catalogue's colour for it (on a dark backing so it reads on the teal button).
-  if (ports.length) $('#btnPort').replaceChildren('Install PC port ', el('span', `port-tier tier ${best}`, `(${STATUS[best] || best})`));
+  // Next to the button: small, in brackets, in the catalogue's colour for it.
+  $('#btnPort').hidden = $('#portTier').hidden = !ports.length;
+  if (ports.length) { $('#portTier').className = `tier ${best}`; $('#portTier').textContent = `(${STATUS[best] || best})`; }
   const up = $('#btnUpdate');
   up.hidden = !st?.updateAvailable; up.className = 'new';
   up.textContent = st?.updateAvailable ? (st.auto ? `⬆ Update to ${st.latest.tag}` : `${st.latest.tag}: update in app`) : '';

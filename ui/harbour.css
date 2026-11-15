@@ -153,7 +153,7 @@ dialog a { color: var(--accent); }
 #catSearch { flex: 1; min-width: 0; }
 /* Port catalogue: how well each one runs, in a column of its own so it's easy to scan. */
 .emu-cat .tier { flex: none; width: calc(130 * var(--u)); text-align: right; font-size: .85em; font-weight: 600; margin-left: auto; }
-#btnPort .port-tier { font-size: .72em; font-weight: 700; margin-left: .35em; padding: .15em .55em; border-radius: 999px; background: rgba(6, 18, 28, .82); vertical-align: middle; }
+#portTier { font-size: .8em; font-weight: 700; align-self: center; margin: 0 calc(4 * var(--u)) 0 calc(-4 * var(--u)); text-shadow: 0 1px 6px rgba(0,0,0,.6); }
 .tier.fully { color: var(--accent); }
 .tier.playable { color: #8fb8ff; }
 .tier.experimental { color: var(--beam); }
