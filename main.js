@@ -937,7 +937,15 @@ async function checkRecomp(gameId, force = false) {
   if (!force && hit && Date.now() - hit.at < RECOMP_CHECK_MS && hit.repo === entry.source.repo) return recompStatus(entry, hit.latest);
   try {
     const latest = await findRelease(entry.source.repo, { asset: entry.source.asset, prerelease: entry.source.prerelease });
-    recompChecks.set(gameId, { at: Date.now(), latest, repo: entry.source.repo }); saveRecompChecks();
+    // A new release Harbour would install: look inside its zip now (a few small reads, once per release) so a project
+    // whose downloads aren't the program you start shows "update in app" straight away, not when you press Update.
+    const lookedIn = hit?.lookedIn === latest.assetId ? hit.lookedIn : null;
+    if (!lookedIn && harbourInstalls(entry.source) && entry.executable && /\.zip$/i.test(latest.assetName) && recompStatus(entry, latest).updateAvailable) {
+      const names = await remoteZipNames(latest.url);
+      const exe = path.basename(entry.executable).toLowerCase();
+      if (names && !names.some(n => n.split('/').pop().toLowerCase() === exe)) updatesWithOwnTool(entry.source, entry.title);
+    }
+    recompChecks.set(gameId, { at: Date.now(), latest, repo: entry.source.repo, lookedIn: lookedIn || latest.assetId }); saveRecompChecks();
     return recompStatus(entry, latest);
   } catch (e) {
     return { ...recompStatus(entry, null), error: e.message };
