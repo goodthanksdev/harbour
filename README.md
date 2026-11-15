@@ -12,7 +12,7 @@
 - **Ports and emulators together**, all on one shelf.
 - **Automatically shows available ports**, along with their playability score.
 - **1,300+ ports** from [Recompendium](https://recompendium.com/)'s catalogue: pick one, choose your game file, done.
-- **Emulators set up for you:** install with one click, Harbour auto-applies your settings.
+- **Emulators in one click:** Harbour installs them and sets fullscreen and resolution. Some still run their own first-time setup.
 - **One-click updates** for ports and emulators, checked before they're installed.
 
 ![Port catalogue](docs/ports.png)
