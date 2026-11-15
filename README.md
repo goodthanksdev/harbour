@@ -67,7 +67,7 @@ Everything Harbour keeps (settings, artwork, clips, logs) lives in `data\` next 
 |---|---|---|
 | A | Enter or Space | Play |
 | B | Esc | Back / close |
-| X | X | More (favourite, rename, artwork, clip, hide or remove…) |
+| X | X | More (favourite, rename, change artwork, clip or video, hide or remove…) |
 | Y | U | Update this game |
 | LB / RB | Q / E or ↑ / ↓ | Previous / next console |
 | LT / RT | Page Up / Page Down | Jump along the shelf |

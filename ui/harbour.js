@@ -120,13 +120,15 @@ async function loadEmulators(force = false) {
   S.emuStatus = await api.checkEmulators(force).catch(() => S.emuStatus || {});
 }
 
+// A picture's address, reloaded from disk after "Change artwork" (same file name, new picture).
+const pic = u => !u || !S.artBust ? u : `${u}${u.includes('?') ? '&' : '?'}a=${S.artBust}`;
 // ---------- cover row ----------
 function renderRow() {
   const row = $('#row'); row.replaceChildren();
   $('#empty').hidden = S.list.length > 0;
   S.list.forEach((g, i) => {
     const it = el('div', 'item'); it.dataset.i = i;
-    const front = g.media?.frontHQ || g.media?.front;
+    const front = pic(g.media?.frontHQ || g.media?.front);
     if (front) {
       it.style.backgroundImage = `url("${front}")`;
       const probe = new Image(); probe.onload = () => { it.style.setProperty('--ar', Math.max(.62, Math.min(1.45, probe.naturalWidth / probe.naturalHeight))); recenterSoon(); }; probe.src = front;
@@ -240,7 +242,7 @@ function select(i, instant = false) {
 let heroFlip = false, heroUrl = '';
 function setHero(g) {
   const big = g && (g.media?.fanart || g.media?.screenshot);
-  const url = big || (g && (g.media?.frontHQ || g.media?.front)) || '';
+  const url = pic(big || (g && (g.media?.frontHQ || g.media?.front)) || '');
   if (url === heroUrl) return;
   heroUrl = url;
   heroFlip = !heroFlip;
@@ -271,7 +273,7 @@ function showGame(g) {
   $('#gActions').style.visibility = g ? '' : 'hidden';
   if (!g) { $('#gTitle').textContent = ''; $('#gLogo').hidden = true; $('#gMeta').replaceChildren(); $('#gDesc').textContent = ''; return; }
   const logo = $('#gLogo');
-  if (g.media?.logo) { logo.src = g.media.logo; logo.alt = g.title; logo.hidden = false; $('#gTitle').textContent = ''; }
+  if (g.media?.logo) { logo.src = pic(g.media.logo); logo.alt = g.title; logo.hidden = false; $('#gTitle').textContent = ''; }
   else { logo.hidden = true; logo.removeAttribute('src'); $('#gTitle').textContent = g.title; }
   const meta = $('#gMeta'); meta.replaceChildren(el('span', 'sys', sysOf(g.system).name));
   const st = S.recomp[g.id];
@@ -338,10 +340,11 @@ function openMenu(anchor) {
   }
   add('Rename…', () => openRename(g));
   add('Open game folder', () => api.openGameFolder(g.id).catch(e => toast(e.message)));
-  add('Download artwork for this game', () => downloadArt('game', g.id));
+  // 🎲: artwork = the next of the database's pictures; clip = another part of the same video; video = a different video.
+  add('🎲 Change artwork', () => downloadArt('game', g.id, true));
   if (g.media?.video) {
-    add('🎲 Reroll clip (another bit of the same longplay)', () => downloadVideos('game', g.id, 'reroll'));
-    add('Find a different longplay', () => downloadVideos('game', g.id, 'new'));
+    add('🎲 Change clip', () => downloadVideos('game', g.id, 'reroll'));
+    add('🎲 Change video', () => downloadVideos('game', g.id, 'new'));
   } else add('Get a video for this game', () => downloadVideos('game', g.id, 'missing'));
   // A PC port you added can be taken out again (its files stay); a game from a games folder can be hidden.
   if (g.recomp) add('Remove from Harbour', async () => {
@@ -698,10 +701,10 @@ api.onVideoProgress?.(job => {
   const finish = mainJob.video; mainJob.video = null;
   reload().then(() => { startVideoSoon(S.list[S.sel]); finish?.(result); });
 });
-function downloadArt(scope, gameId) {
-  return enqueue(`art:${scope}:${gameId || ''}`, 'Artwork', () => new Promise((resolve, reject) => {
-    S.artBusy = true; mainJob.art = resolve;
-    api.artStart({ scope, gameId, types: ['front', 'fanart', 'logo', 'screenshot'], retryMissing: true, upgrade: false })
+function downloadArt(scope, gameId, reroll = false) {
+  return enqueue(`art:${scope}:${gameId || ''}${reroll ? ':next' : ''}`, reroll ? 'Changing artwork' : 'Artwork', () => new Promise((resolve, reject) => {
+    S.artBusy = true; S.artReroll = reroll; mainJob.art = resolve;
+    api.artStart({ scope, gameId, types: ['front', 'fanart', 'logo', 'screenshot'], retryMissing: true, upgrade: false, reroll })
       .catch(e => { S.artBusy = false; mainJob.art = null; reject(e); });
   }));
 }
@@ -709,7 +712,10 @@ api.onArtProgress?.(job => {
   if (!job) return;
   if (job.status === 'running') { jobProgress(job.total > 1 ? `Artwork ${job.completed} of ${job.total}` + (job.lastTitle ? ` · ${job.lastTitle}` : '') : `Artwork · ${job.lastTitle || ''}`, job.total > 1 ? job.completed / job.total : 0); return; }
   const finish = mainJob.art; mainJob.art = null; S.artBusy = false;
-  reload().then(() => finish?.({ done: `Artwork done: ${job.downloaded} new image${job.downloaded === 1 ? '' : 's'}` }));
+  // Changed pictures keep their file names: a new ?v= makes the window load them again instead of its cached copies.
+  if (S.artReroll) S.artBust = Date.now();
+  const msg = S.artReroll ? (job.downloaded ? 'New artwork' : 'No other artwork for this game') : `Artwork done: ${job.downloaded} new image${job.downloaded === 1 ? '' : 's'}`;
+  reload().then(() => finish?.(S.artReroll && !job.downloaded ? { fail: msg } : { done: msg }));
 });
 
 // ---------- input: keyboard, mouse, controller ----------

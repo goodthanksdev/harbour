@@ -314,14 +314,46 @@ function createArtworkService({ dataDir, getSystems, getGames, normalize, fetchI
     try { return await job; } finally { if (busy.get(id) === job) busy.delete(id); }
   }
 
-  // One picture for one game. Keeps what's there (unless `upgrade` and it's blurry), else downloads.
-  async function onePicture(game, kind, { signal, run, retryMissing = false, upgrade = false, background = false }) {
+  // Which of LaunchBox's pictures each game shows after "Change artwork" ("console/base/kind" -> its place in the list).
+  const picksFile = path.join(dataDir, 'media', '_index', 'art-picks.json');
+  // Read once and shared: the four kinds change at the same time and must all land in the same record.
+  let picks = null, picksLoading = null;
+  const loadPicks = () => (picksLoading ||= fsp.readFile(picksFile, 'utf8').then(JSON.parse).catch(() => ({})).then(p => (picks = p)));
+  const savePicks = () => fsp.mkdir(path.dirname(picksFile), { recursive: true }).then(() => fsp.writeFile(picksFile, JSON.stringify(picks))).catch(() => {});
+
+  // "Change artwork": the next of LaunchBox's pictures for this game and kind, in place of the one shown. Going
+  // round again comes back to the first. Kinds with only one picture stay as they are.
+  async function nextPicture(game, console_, kind, base, have, keep, signal) {
+    const urls = launchbox ? await launchbox.find(console_.id, titleKeys(game), kind, {}).catch(() => []) : [];
+    if (urls.length < (keep.media[kind] ? 2 : 1)) return { ...keep, same: 1 };
+    const all = await loadPicks(), key = `${console_.id}/${base}/${kind}`;
+    for (let step = 1; step <= urls.length; step++) {
+      const i = ((all[key] ?? 0) + step) % urls.length;
+      let bytes = null;
+      try { bytes = await getImage(urls[i], signal); } catch (e) { if (signal?.aborted) throw e; }
+      if (!bytes) continue;
+      const saved = await prepare(bytes, kind);
+      stopIfCancelled(signal);
+      const target = path.join(mediaFolder(console_.id, kind), `${base}.${saved.ext}`);
+      await fsp.mkdir(path.dirname(target), { recursive: true });
+      const temp = `${target}.${randomUUID()}.tmp`;
+      try { await fsp.writeFile(temp, saved.bytes); await fsp.rename(temp, target); } catch (e) { await fsp.unlink(temp).catch(() => {}); throw e; }
+      if (have && have !== target) await fsp.unlink(have).catch(() => {});
+      all[key] = i; await savePicks();
+      return { downloaded: 1, upgraded: 1, media: { [kind]: `${pathToFileURL(target).href}?v=${Date.now()}` } };
+    }
+    return { ...keep, same: 1 };
+  }
+
+  // One picture for one game. Keeps what's there (unless `upgrade` and it's blurry, or `reroll`), else downloads.
+  async function onePicture(game, kind, { signal, run, retryMissing = false, upgrade = false, background = false, reroll = false }) {
     stopIfCancelled(signal);
     const console_ = getSystems().find(s => s.id === game.system);
     const base = checkBase(game.base);
     const have = game.media?.[kind] ? ourFile(game.media[kind], console_, kind) : existingFile(console_, kind, base);
     const haveUrl = game.media?.[kind] || (have && pathToFileURL(have).href);
     const keep = { existing: 1, media: { [kind]: haveUrl } };
+    if (reroll) return shared(`${console_.id}/${base}/${kind}/next`, signal, () => nextPicture(game, console_, kind, base, have, keep, signal));
 
     if (haveUrl) {
       const width = have && upgrade && SHARP_ENOUGH[kind] ? widthOfFile(have) : 0;
@@ -415,7 +447,7 @@ function createArtworkService({ dataDir, getSystems, getGames, normalize, fetchI
     job = { id: randomUUID(), seq: 0, status: 'running', scope, types: kinds, total: games.length, completed: 0, downloaded: 0, upgraded: 0,
       existing: 0, missing: 0, unsupported: 0, errors: 0, lastTitle: 'Preparing download…', entries: [], startedAt: Date.now() };
     const run = { refreshed: new Set(), broken: new Map() };
-    const settings = { signal, run, retryMissing: !!options.retryMissing, upgrade: !!options.upgrade };
+    const settings = { signal, run, retryMissing: !!options.retryMissing, upgrade: !!options.upgrade, reroll: !!options.reroll };
     send(null, true);
 
     let next = 0;
