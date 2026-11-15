@@ -1270,7 +1270,7 @@ async function launchDirect(game) {
     return true;
   }
   const exe = macAppBinary(file);
-  // A PC port can need options or its own starting folder (NX2navi starts through its launcher's play mode).
+  // A PC port can need options or its own starting folder (some start through their own launcher's play mode).
   const entry = game.recomp ? config.extraGames.find(x => x.id === game.added) : null;
   const args = Array.isArray(entry?.args) ? entry.args.map(String) : [];
   const cwd = entry?.cwd && fs.existsSync(entry.cwd) ? entry.cwd : path.dirname(exe);
@@ -1979,8 +1979,8 @@ handle('harbour:setEmulator', ({ id, systems, args, name }) => {
   return true;
 });
 // ---------- Game folders ----------
-// A folder of game files for a console. Choosing a parent folder ("D:\Games\roms") instead finds the
-// consoles' own folders inside it by name: "N64", "PS2", "Switch", "X360", "DS"…
+// A folder of game files for a console. Choosing a parent folder instead finds the consoles' own folders
+// inside it by name: "N64", "PS2", "Switch", "X360", "DS"…
 const FOLDER_NAMES = {
   a2600: ['atari 2600', '2600', 'atari'], arcade: ['arcade', 'mame'], nes: ['nes', 'famicom'], genesis: ['genesis', 'mega drive', 'megadrive', 'md'],
   gb: ['gb', 'game boy', 'gameboy'], snes: ['snes', 'super nintendo', 'super famicom', 'sfc'], ps1: ['ps1', 'psx', 'playstation', 'playstation 1'],
