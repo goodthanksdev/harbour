@@ -157,18 +157,18 @@ function openUpdates() { UISound.play('open'); renderUpdates(); if (!$('#updates
 function renderUpdates() {
   const list = pendingUpdates();
   $('#updAll').hidden = !list.some(u => u.auto);
-  $('#updAll').textContent = S.updatingAll ? 'Updating all…' : `Update all (${list.filter(u => u.auto).length})`;
-  $('#updAll').disabled = updating;
+  $('#updAll').textContent = `Update all (${list.filter(u => u.auto).length})`;
+  $('#updAll').disabled = !list.some(u => u.auto && !jobState(`update:${u.kind}:${u.id}`));
   $('#updList').replaceChildren(...(list.length ? list.map(u => {
     const row = el('div', 'upd-row');
     const name = el('div', 'upd-name'); name.append(el('b', '', u.name), el('small', '', `${u.kind === 'emu' ? 'Emulator' : 'Game'} · ${u.from || '?'} → ${u.to || '?'}`));
     const btns = el('div', 'emu-btns');
     const b = (text, fn, cls = '') => { const x = el('button', cls, text); x.type = 'button'; x.onclick = fn; btns.append(x); return x; };
     if (u.auto) {
-      // While an update runs its button shows the progress, and every update button waits.
-      const key = `${u.kind}:${u.id}`, mine = S.updatingKey === key;
-      const x = b(mine ? S.updProgress || 'Updating…' : 'Update', () => updateOne(u), mine ? 'primary busy' : 'primary');
-      x.dataset.key = key; x.disabled = updating;
+      // Its button shows when it's waiting in the queue, and how far it is while it runs.
+      const key = `update:${u.kind}:${u.id}`, st = jobState(key), pct = st === 'running' ? Q.cur.pct : 0;
+      const x = b(st === 'running' ? (pct > 0 && pct < 1 ? `${Math.round(pct * 100)}%` : 'Updating…') : st === 'queued' ? 'Queued' : 'Update', () => updateOne(u), st ? 'primary busy' : 'primary');
+      x.dataset.key = key; x.disabled = !!st;
     } else {
       // Harbour can't install this one: say where to update it. It notices by itself once it's done.
       name.append(el('small', 'upd-how', 'Update in app'));
@@ -178,29 +178,19 @@ function renderUpdates() {
   }) : [el('p', 'note', 'Everything is up to date.')]));
 }
 function afterUpdates() { refreshBadges(); renderRow(); select(S.sel, true); if ($('#updatesDlg').open) renderUpdates(); }
-async function updateOne(u) {
-  if (updating) return toast('An update is already running.');
-  updating = true;
-  S.updatingName = u.name; S.updatingKey = `${u.kind}:${u.id}`; S.updProgress = '';
-  Activity.set('update', `Updating ${u.name}…`);
-  if ($('#updatesDlg').open) renderUpdates();
-  try {
-    if (u.kind === 'harbour') { await api.selfUpdate(); Activity.set('update', 'Harbour updated: restarting…'); return true; }  // restarts itself
-    if (u.kind === 'emu') S.emuStatus[u.id] = await api.emuUpdate(u.id);
-    else S.recomp[u.id] = await api.recompUpdate(u.id);
-    UISound.play('select'); Activity.done('update', `${u.name} updated to ${u.to}`); return true;
-  } catch (e) { UISound.play('error'); Activity.fail('update', `${u.name}: ${e.message}`); return false; }
-  finally { updating = false; S.updatingKey = null; afterUpdates(); }
+function updateOne(u) {
+  return enqueue(`update:${u.kind}:${u.id}`, `Updating ${u.name}`, async () => {
+    try {
+      if (u.kind === 'harbour') { await api.selfUpdate(); jobProgress('Harbour updated: restarting…', 1); return { done: 'Harbour updated: restarting…' }; }  // restarts itself
+      if (u.kind === 'emu') S.emuStatus[u.id] = await api.emuUpdate(u.id);
+      else S.recomp[u.id] = await api.recompUpdate(u.id);
+      UISound.play('select');
+      return { done: `${u.name} updated to ${u.to}` };
+    } finally { afterUpdates(); }
+  });
 }
-$('#updAll').onclick = async () => {
-  if (updating) return;
-  const autos = pendingUpdates().filter(u => u.auto);
-  let ok = 0;
-  S.updatingAll = true;
-  try { for (const u of autos) if (await updateOne(u)) ok++; } // one at a time: each downloads, checks and backs up on its own
-  finally { S.updatingAll = false; if ($('#updatesDlg').open) renderUpdates(); }
-  if (autos.length > 1) toast(`${ok} of ${autos.length} updates installed.`, 6000);
-};
+// Each one downloads, checks and backs up on its own, in turn.
+$('#updAll').onclick = () => { for (const u of pendingUpdates().filter(u => u.auto)) updateOne(u); };
 $('#updClose').onclick = () => { UISound.play('back'); $('#updatesDlg').close(); };
 $('#updatePill').onclick = openUpdates;
 
@@ -319,20 +309,11 @@ async function play(g = S.list[S.sel]) {
   try { await api.launch(g.id); toast(`Starting ${g.title}…`, 2500); }
   catch (e) { UISound.play('error'); toast(e.message, 6000); }
 }
-let updating = false;
-async function update(g = S.list[S.sel]) {
+function update(g = S.list[S.sel]) {
   const st = g && S.recomp[g.id];
   if (!st?.updateAvailable) return;
   if (!st.auto) { api.recompOpenPage(g.id).then(() => toast('Update in app.', 4000)).catch(e => toast(e.message)); return; }
-  if (updating) return toast('An update is already running.');
-  updating = true;
-  S.updatingName = g.title; Activity.set('update', `Updating ${g.title}…`);
-  try {
-    const r = await api.recompUpdate(g.id);
-    S.recomp[g.id] = r; refreshBadges(); showGame(S.list[S.sel]);
-    Activity.done('update', `${g.title} updated to ${r.latest.tag}` + (r.kept?.length ? ` · kept ${r.kept.length} settings file${r.kept.length === 1 ? '' : 's'}` : ''));
-  } catch (e) { Activity.fail('update', `${g.title}: ${e.message}`); }
-  finally { updating = false; }
+  updateOne({ kind: 'game', id: g.id, name: g.title, to: st.latest.tag });
 }
 async function checkUpdates(force = false) {
   if (force) Activity.set('check', 'Checking for updates…');
@@ -453,8 +434,8 @@ async function afterAdd(match, what) {
   setTab(g.system); select(S.list.findIndex(x => x.id === g.id));
   UISound.play('select');
   toast(`Added ${g.title}.`, 4000);
-  await downloadArt('game', g.id);
-  const waitArt = setInterval(async () => { if (!S.artBusy) { clearInterval(waitArt); downloadVideos('game', g.id, 'missing'); } }, 1500);
+  downloadArt('game', g.id);
+  downloadVideos('game', g.id, 'missing');
 }
 $('#addPort').addEventListener('submit', async e => {
   e.preventDefault(); const f = e.target, found = S.portFound;
@@ -612,7 +593,7 @@ async function addGameFolder(system) {
     if (missing.length) installFor(missing).then(() => renderEmulators());
     const fresh = S.games.filter(g => r.added.some(a => a.system === g.system) && !g.media?.front && !g.recomp);
     // New games get their artwork, then a gameplay clip each, without being asked.
-    if (fresh.length) { S.afterArt = () => downloadVideos('library', '', 'missing'); await downloadArt('library'); }
+    if (fresh.length) { downloadArt('library'); downloadVideos('library', '', 'missing'); }
   } catch (e) { UISound.play('error'); toast(e.message, 7000); }
 }
 $('#addGamesRoot').onclick = () => addGameFolder('');
@@ -686,43 +667,47 @@ $('#setUnhide').onclick = async () => {
 $('#setCheck').onclick = () => { $('#settings').close(); checkUpdates(true); };
 $('#setArt').onclick = () => { $('#settings').close(); downloadArt('library'); };
 $('#setVideos').onclick = () => { $('#settings').close(); downloadVideos('library'); };
-async function downloadVideos(scope, gameId, mode = 'missing') {
-  // Artwork first: new clips wait until the covers and backgrounds are in.
-  if (S.artBusy && mode === 'missing') { const before = S.afterArt; S.afterArt = () => { before?.(); downloadVideos(scope, gameId, mode); }; return; }
-  // Let go of the clip first: Windows won't replace a video file that's still playing.
-  if (mode !== 'missing') { S.videoJob = scope === 'game' ? gameId : 'library'; stopVideo(); }
-  try {
-    await api.videoStart({ scope, gameId, mode });
-    Activity.set('video', mode === 'reroll' ? 'Rerolling the clip…' : mode === 'new' ? 'Finding a different longplay…' : 'Getting game videos…');
-  } catch (e) { S.videoJob = null; UISound.play('error'); Activity.fail('video', e.message); startVideoSoon(S.list[S.sel]); }
+// Artwork and clips are made by the main process; their queue jobs wait for it to say it's finished.
+const mainJob = { art: null, video: null };
+function downloadVideos(scope, gameId, mode = 'missing') {
+  const label = mode === 'reroll' ? 'Rerolling the clip' : mode === 'new' ? 'Finding a different longplay' : 'Game videos';
+  return enqueue(`video:${scope}:${gameId || ''}:${mode}`, label, () => new Promise((resolve, reject) => {
+    // Let go of the clip first: Windows won't replace a video file that's still playing.
+    if (mode !== 'missing') { S.videoJob = scope === 'game' ? gameId : 'library'; stopVideo(); }
+    mainJob.video = resolve;
+    api.videoStart({ scope, gameId, mode }).catch(e => {
+      S.videoJob = null; mainJob.video = null; startVideoSoon(S.list[S.sel]);
+      if (/already has a video/i.test(e.message)) resolve({ quiet: true }); else reject(e);  // nothing to do isn't a failure
+    });
+  }));
 }
 api.onVideoProgress?.(job => {
   if (job && job.status !== 'running') S.videoJob = null; // finished: clips can play again
   if (!job) return;
-  if (job.status === 'running') { Activity.set('video', job.total > 1 ? `Videos ${job.done || 0} of ${job.total} · ${job.stage}` : job.stage, job.total > 1 ? (job.done || 0) / job.total : 0); return; }
-  if (job.status === 'failed') { Activity.fail('video', 'Videos stopped: ' + job.stage); startVideoSoon(S.list[S.sel]); return; }
-  if (job.total === 1) {
-    if (job.saved) Activity.done('video', 'New clip ready');
-    else Activity.fail('video', job.failed ? `Couldn't get a clip: ${job.errors?.[0]?.split(': ').slice(1).join(': ') || 'unknown error'}` : 'No gameplay video found');
-  } else {
+  if (job.status === 'running') { jobProgress(job.total > 1 ? `Videos ${job.done || 0} of ${job.total} · ${job.stage}` : job.stage, job.total > 1 ? (job.done || 0) / job.total : 0); return; }
+  let result;
+  if (job.status === 'failed') result = { fail: 'Videos stopped: ' + job.stage };
+  else if (job.total === 1) result = job.saved ? { done: 'New clip ready' } : { fail: job.failed ? `Couldn't get a clip: ${job.errors?.[0]?.split(': ').slice(1).join(': ') || 'unknown error'}` : 'No gameplay video found' };
+  else {
     const msg = `Videos done: ${job.saved} saved` + (job.noLink ? `, ${job.noLink} had no link` : '') + (job.failed ? `, ${job.failed} failed` : '');
-    job.failed && !job.saved ? Activity.fail('video', msg) : Activity.done('video', msg);
+    result = job.failed && !job.saved ? { fail: msg } : { done: msg };
   }
   S.videoBust = Date.now();
-  reload().then(() => { if (job.total === 1) startVideoSoon(S.list[S.sel]); });
+  const finish = mainJob.video; mainJob.video = null;
+  reload().then(() => { startVideoSoon(S.list[S.sel]); finish?.(result); });
 });
-async function downloadArt(scope, gameId) {
-  if (S.artBusy) return toast('Artwork is already downloading.');
-  try { await api.artStart({ scope, gameId, types: ['front', 'fanart', 'logo', 'screenshot'], retryMissing: true, upgrade: false }); S.artBusy = true; Activity.set('art', 'Downloading artwork…'); }
-  catch (e) { Activity.fail('art', e.message); }
+function downloadArt(scope, gameId) {
+  return enqueue(`art:${scope}:${gameId || ''}`, 'Artwork', () => new Promise((resolve, reject) => {
+    S.artBusy = true; mainJob.art = resolve;
+    api.artStart({ scope, gameId, types: ['front', 'fanart', 'logo', 'screenshot'], retryMissing: true, upgrade: false })
+      .catch(e => { S.artBusy = false; mainJob.art = null; reject(e); });
+  }));
 }
 api.onArtProgress?.(job => {
   if (!job) return;
-  if (job.status === 'running') { if (job.total > 1) Activity.set('art', `Artwork ${job.completed} of ${job.total}` + (job.lastTitle ? ` · ${job.lastTitle}` : ''), job.completed / job.total); return; }
-  if (S.artBusy) {
-    S.artBusy = false; Activity.done('art', `Artwork done: ${job.downloaded} new image${job.downloaded === 1 ? '' : 's'}`);
-    reload().then(() => { const next = S.afterArt; S.afterArt = null; next?.(); });
-  }
+  if (job.status === 'running') { jobProgress(job.total > 1 ? `Artwork ${job.completed} of ${job.total}` + (job.lastTitle ? ` · ${job.lastTitle}` : '') : `Artwork · ${job.lastTitle || ''}`, job.total > 1 ? job.completed / job.total : 0); return; }
+  const finish = mainJob.art; mainJob.art = null; S.artBusy = false;
+  reload().then(() => finish?.({ done: `Artwork done: ${job.downloaded} new image${job.downloaded === 1 ? '' : 's'}` }));
 });
 
 // ---------- input: keyboard, mouse, controller ----------
@@ -905,11 +890,12 @@ function autoMedia() {
   try { tried = JSON.parse(localStorage.getItem('harbourAutoTried') || '{}'); } catch {}
   const now = Date.now();
   const fresh = S.games.filter(g => !g.demo && (!g.media?.front || !g.media?.video) && !(now - (tried[g.id] || 0) < AUTO_RETRY_MS));
-  if (!fresh.length || S.artBusy || S.videoJob) return;
+  if (!fresh.length) return;
   for (const g of fresh) tried[g.id] = now;
   try { localStorage.setItem('harbourAutoTried', JSON.stringify(tried)); } catch {}
-  const clips = () => { if (fresh.some(g => !S.games.find(x => x.id === g.id)?.media?.video)) downloadVideos('library', '', 'missing'); };
-  if (fresh.some(g => !g.media?.front)) { S.afterArt = clips; downloadArt('library'); } else clips();
+  // Artwork first, then clips: the queue keeps that order.
+  if (fresh.some(g => !g.media?.front)) downloadArt('library');
+  if (fresh.some(g => !g.media?.video)) downloadVideos('library', '', 'missing');
 }
 
 // ---------- start ----------
@@ -944,15 +930,10 @@ async function init() {
     for (const c of changed || []) { const g = S.games.find(x => x.id === c.gameId); if (g) g.info = c.info; }
     showGame(S.list[S.sel]);
   });
-  // The finished tick comes from updateOne()/update(), which know the new version.
   api.onRecompProgress?.(p => {
     if (p.done) return;
-    if (String(p.gameId).startsWith('install:')) { installs.stage = p.stage; installs.pct = p.pct; showInstallBadge(); return; }
-    Activity.set('update', `${S.updatingName ? S.updatingName + ': ' : ''}${p.stage}${p.pct && p.pct < 1 ? ` ${Math.round(p.pct * 100)}%` : ''}`, p.pct);
-    // The running update's button in the Updates window shows how far it is.
-    S.updProgress = p.pct && p.pct < 1 ? `${Math.round(p.pct * 100)}%` : /install/i.test(p.stage) ? 'Installing…' : 'Updating…';
-    const btn = S.updatingKey && document.querySelector(`#updList button[data-key="${S.updatingKey}"]`);
-    if (btn) btn.textContent = S.updProgress;
+    // Installs and updates run one at a time, so this is the running queue job's progress.
+    if (Q.cur) jobProgress(/download/i.test(p.stage) || !p.stage ? Q.cur.label : `${Q.cur.label} · ${p.stage}`, p.pct);
   });
   setFrozen();
 }
@@ -1001,60 +982,90 @@ async function installFor(systems) {
   } finally { renderRow(); select(S.sel, true); }
 }
 const emuDef = sysId => (S.emus || []).some(e => e.id === S.config.systems.find(s => s.id === sysId)?.emulator && e.exe);
-// Emulator installs wait their turn and run one at a time (each is a big download), so adding several at once is
-// fine. One quiet badge shows the one installing and how many are waiting. Resolves true once it's installed.
-const installs = { queue: [], current: null, done: new Set(), stage: '', pct: 0 };
-const installState = id => installs.current?.c.id === id ? 'installing' : installs.queue.some(j => j.c.id === id) ? 'queued' : installs.done.has(id) ? 'installed' : null;
-const installsPending = () => [installs.current, ...installs.queue].filter(Boolean).map(j => j.c);
-function installEmulator(c) {
-  const known = [installs.current, ...installs.queue].find(j => j?.c.id === c.id);
+// ---------- the download queue ----------
+// Everything Harbour downloads (emulator installs, updates, artwork, game clips) waits its turn and runs one at a
+// time, in the order asked for. One quiet badge shows what's running and how many are waiting; a failure gets a
+// badge of its own and the queue carries on. Asking for something already waiting just waits for that one.
+const Q = { list: [], cur: null, finished: 0, lastDone: '' };
+const jobState = key => Q.cur?.key === key ? 'running' : Q.list.some(j => j.key === key) ? 'queued' : null;
+// run(job) does the work and returns { done: 'message' } (or { fail: 'message' }, or { quiet: true } when there
+// was nothing to do). Resolves true when it worked.
+function enqueue(key, label, run, extra = {}) {
+  const known = [Q.cur, ...Q.list].find(j => j?.key === key);
   if (known) return known.promise;
-  const job = { c };
+  const job = { key, label, run, text: label, pct: 0, ...extra };
   job.promise = new Promise(resolve => { job.resolve = resolve; });
-  installs.queue.push(job);
-  installsChanged(); runInstalls();
+  Q.list.push(job);
+  queueChanged(); pumpQueue();
   return job.promise;
 }
-async function runInstalls() {
-  if (installs.current || !installs.queue.length) return;
-  const job = installs.current = installs.queue.shift();
-  installs.stage = ''; installs.pct = 0;
-  installsChanged();
+async function pumpQueue() {
+  if (Q.cur || !Q.list.length) return;
+  const job = Q.cur = Q.list.shift();
+  queueChanged();
   let ok = false;
   try {
-    const r = await api.installEmulator(job.c.id);
-    ok = true; installs.done.add(job.c.id); UISound.play('select');
-    document.querySelectorAll(`#emuCatalog button[data-id="${job.c.id}"]`).forEach(b => { b.dataset.installed = '1'; });
-    if (r.note) toast(`${job.c.name}: ${r.note}`, 6000);
+    const r = (await job.run(job)) || {};
+    if (r.fail) { UISound.play('error'); Activity.fail('fail-' + job.key, r.fail); }
+    else if (!r.quiet) { ok = true; Q.finished++; Q.lastDone = r.done || `${job.label}: done`; }
+  } catch (e) { UISound.play('error'); Activity.fail('fail-' + job.key, `${job.label}: ${e.message}`); }
+  Q.cur = null; job.resolve(ok);
+  if (!Q.list.length) {
+    if (Q.finished) Activity.done('queue', Q.finished > 1 ? `All done: ${Q.finished} downloads` : Q.lastDone);
+    else Activity.end('queue', '', 'ok', '', 1);
+    Q.finished = 0;
+  }
+  queueChanged(); pumpQueue();
+}
+// How far the running job is: the badge, and its button in the Updates window.
+function jobProgress(text, pct = 0) {
+  if (!Q.cur) return;
+  Q.cur.text = text; Q.cur.pct = pct;
+  showQueueBadge();
+  const btn = document.querySelector(`#updList button[data-key="${Q.cur.key}"]`);
+  if (btn) btn.textContent = pct > 0 && pct < 1 ? `${Math.round(pct * 100)}%` : 'Updating…';
+}
+function showQueueBadge() {
+  const j = Q.cur; if (!j) return;
+  const pct = j.pct > 0 && j.pct < 1 ? ` ${Math.round(j.pct * 100)}%` : '';
+  // The waiting count goes first so a long status line can't cut it off.
+  Activity.set('queue', (Q.list.length ? `${Q.list.length} queued · ` : '') + j.text + pct, j.pct);
+}
+// Everything that shows the queue: the badge, the install list's buttons, Manage and the Updates window.
+function queueChanged() {
+  showQueueBadge();
+  document.querySelectorAll('#emuCatalog button[data-id]').forEach(catalogButton);
+  if ($('#emusDlg').open) renderEmulators();
+  if ($('#updatesDlg').open) renderUpdates();
+}
+// The badges and toasts stay in front of open windows: windows sit in the browser's top layer, so these join it
+// (as popovers) and step back in front each time a window opens.
+const raiseNotices = () => { for (const n of [$('#activity'), $('#toast')]) try { if (n.matches(':popover-open')) n.hidePopover(); n.showPopover(); } catch {} };
+{
+  const showModal = HTMLDialogElement.prototype.showModal;
+  HTMLDialogElement.prototype.showModal = function () { showModal.call(this); raiseNotices(); };
+  raiseNotices();
+}
+
+// Emulator installs (＋ → Emulator, Manage, the Install button on a game).
+function installEmulator(c) {
+  return enqueue('install:' + c.id, `Installing ${c.name}`, async () => {
+    const r = await api.installEmulator(c.id);
+    UISound.play('select');
+    document.querySelectorAll(`#emuCatalog button[data-id="${c.id}"]`).forEach(b => { b.dataset.installed = '1'; });
+    if (r.note) toast(`${c.name}: ${r.note}`, 6000);
     S.config = await api.getConfig();
     await loadEmulators(false); renderRow(); select(S.sel, true);
-  } catch (e) {
-    UISound.play('error'); Activity.fail('install-' + job.c.id, `${job.c.name}: ${e.message}`);
-  }
-  installs.current = null; job.resolve(ok);
-  if (!installs.queue.length) {
-    const n = installs.done.size;
-    if (ok) Activity.done('install', n > 1 ? `${n} emulators installed` : `${job.c.name} installed`); else Activity.end('install', '', 'ok', '', 1);
-    installs.done.clear();
-  }
-  installsChanged(); runInstalls();
+    return { done: `${c.name} installed` };
+  }, { c });
 }
-function showInstallBadge() {
-  const j = installs.current; if (!j) return;
-  const pct = installs.pct > 0 && installs.pct < 1 ? ` ${Math.round(installs.pct * 100)}%` : '';
-  Activity.set('install', `Installing ${j.c.name}${pct}` + (installs.queue.length ? ` · ${installs.queue.length} queued` : ''), installs.pct);
-}
+const installState = id => ({ running: 'installing', queued: 'queued' })[jobState('install:' + id)] || null;
+const installsPending = () => [Q.cur, ...Q.list].filter(j => j?.c).map(j => j.c);
 function catalogButton(btn) {
   const st = btn.dataset.installed ? 'installed' : installState(btn.dataset.id);
   btn.className = st ? (st === 'installed' ? '' : 'busy') : 'primary';
   btn.textContent = { installed: 'Installed', installing: 'Installing…', queued: 'Queued' }[st] || 'Install';
   btn.disabled = !!st;
-}
-// Everything that shows installs: the badge, the install list's buttons, and Manage.
-function installsChanged() {
-  showInstallBadge();
-  document.querySelectorAll('#emuCatalog button[data-id]').forEach(catalogButton);
-  if ($('#emusDlg').open) renderEmulators();
 }
 // From the install list back to your emulators (Manage), and the other way with "＋ Add emulators".
 $('#emuManage').onclick = () => { UISound.play('select'); $('#addDlg').close(); openEmulators(); };
