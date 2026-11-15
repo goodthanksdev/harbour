@@ -64,6 +64,8 @@ contextBridge.exposeInMainWorld('api', {
   onArtProgress: on('art:progress'),
   videoStart: options => call('video:start', options),
   videoStatus: () => call('video:status'),
+  videoUsage: () => call('video:usage'),
+  videoClearAll: () => call('video:clearAll'),
   onVideoProgress: on('video:progress'),
   // window
   isFullscreen: () => call('app:fullscreen'),

@@ -256,8 +256,11 @@ function stopVideo() {
   const v = $('#heroVideo'); v.classList.remove('on'); v.pause();
   if (v.getAttribute('src')) { v.removeAttribute('src'); v.load(); } // frees the decoder
 }
+// Game videos can be switched off (Settings): then only the cover art shows, and no clips are downloaded.
+const videosOn = () => S.config?.harbourVideos !== false;
 function startVideoSoon(g) {
   stopVideo();
+  if (!videosOn()) return;
   // While clips are being fetched for a game, its old clip isn't played (it's about to be replaced).
   if (!g?.media?.video || S.running || !S.focused || S.videoJob === 'library' || S.videoJob === g.id) return;
   videoTimer = setTimeout(() => {
@@ -343,10 +346,10 @@ function openMenu(anchor) {
   // 🎲: cover art = the next of the database's backgrounds (the big picture behind the game; the box cover stays);
   // clip = another part of the same video; video = a different video.
   add('🎲 Change cover art', () => downloadArt('game', g.id, [g.media?.fanart || !g.media?.screenshot ? 'fanart' : 'screenshot']));
-  if (g.media?.video) {
+  if (videosOn() && g.media?.video) {
     add('🎲 Different clip', () => downloadVideos('game', g.id, 'reroll'));
     add('🎲 Change video', () => downloadVideos('game', g.id, 'new'));
-  } else add('Get a video for this game', () => downloadVideos('game', g.id, 'missing'));
+  } else if (videosOn()) add('Get a video for this game', () => downloadVideos('game', g.id, 'missing'));
   // A PC port you added can be taken out again (its files stay); a game from a games folder can be hidden.
   if (g.recomp) add('Remove from Harbour', async () => {
     if (!confirm(`Remove ${g.title} from Harbour? Its files stay where they are.`)) return;
@@ -642,6 +645,10 @@ function openSettings() {
   $('#setUnhide').disabled = !hidden;
   $('#setIdle').value = String(S.config.harbourIdle ?? 120);
   $('#setSound').value = S.config.harbourVideoSound ? '1' : '0';
+  $('#setVideosOn').value = videosOn() ? '1' : '0'; $('#setVideos').disabled = !videosOn();
+  // How much space the clips take, on the Delete button.
+  $('#setClearVideos').textContent = 'Delete all'; $('#setClearVideos').disabled = true;
+  api.videoUsage().then(bytes => { $('#setClearVideos').textContent = `Delete all (${sizeText(bytes)})`; $('#setClearVideos').disabled = !bytes; }).catch(() => {});
   $('#setUiSound').value = S.config.harbourUiSound === false ? '0' : '1';
   $('#setUiVol').value = uiVolume(); $('#setVidVol').value = videoVolume(); showVolumes();
   $('#settings').showModal();
@@ -673,11 +680,33 @@ $('#setUnhide').onclick = async () => {
 $('#setCheck').onclick = () => { $('#settings').close(); checkUpdates(true); };
 $('#setArt').onclick = () => { $('#settings').close(); downloadArt('library'); };
 $('#setVideos').onclick = () => { $('#settings').close(); downloadVideos('library'); };
+const sizeText = b => b >= 1073741824 ? `${(b / 1073741824).toFixed(1)} GB` : `${Math.max(1, Math.round(b / 1048576))} MB`;
+$('#setVideosOn').onchange = e => {
+  const on = e.target.value === '1';
+  saveSetting({ harbourVideos: on }); $('#setVideos').disabled = !on;
+  if (on) startVideoSoon(S.list[S.sel]); else stopVideo();
+};
+// Deleting them also switches videos off: otherwise Harbour would just download them all again.
+$('#setClearVideos').onclick = async () => {
+  if (!confirm('Delete every game clip? Game videos will be switched off too, so they aren\'t downloaded again. Turn them back on any time.')) return;
+  stopVideo(); S.videoJob = 'library';
+  try {
+    const freed = await api.videoClearAll();
+    await saveSetting({ harbourVideos: false });
+    $('#setVideosOn').value = '0'; $('#setVideos').disabled = true;
+    $('#setClearVideos').textContent = 'Delete all'; $('#setClearVideos').disabled = true;
+    toast(`Clips deleted: ${sizeText(freed)} freed.`, 5000);
+    await reload();
+  } catch (err) { toast(err.message, 6000); }
+  finally { S.videoJob = null; }
+};
 // Artwork and clips are made by the main process; their queue jobs wait for it to say it's finished.
 const mainJob = { art: null, video: null };
 function downloadVideos(scope, gameId, mode = 'missing') {
+  if (!videosOn()) return Promise.resolve(false);
   const label = mode === 'reroll' ? 'Rerolling the clip' : mode === 'new' ? 'Finding a different longplay' : 'Game videos';
   return enqueue(`video:${scope}:${gameId || ''}:${mode}`, label, () => new Promise((resolve, reject) => {
+    if (!videosOn()) return resolve({ quiet: true });  // switched off while it waited
     // Let go of the clip first: Windows won't replace a video file that's still playing.
     if (mode !== 'missing') { S.videoJob = scope === 'game' ? gameId : 'library'; stopVideo(); }
     mainJob.video = resolve;

@@ -148,6 +148,7 @@ dialog::backdrop { background: rgba(3,7,14,.7); backdrop-filter: blur(8px); }
 dialog h2 { margin: 0 0 calc(18 * var(--u)); font-size: calc(30 * var(--u)); }
 .set-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: calc(12 * var(--u)) 0; border-bottom: 1px solid var(--line); }
 .set-row span { color: var(--muted); }
+.set-row .set-btns { display: flex; gap: calc(10 * var(--u)); }
 select, input:not([type=checkbox]) { background: rgba(0,0,0,.35); border: 1px solid var(--line); border-radius: 8px; padding: calc(8 * var(--u)) calc(10 * var(--u)); }
 #rdForm { display: grid; gap: calc(12 * var(--u)); }
 #rdForm label { display: grid; gap: 6px; color: var(--muted); }

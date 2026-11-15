@@ -2166,6 +2166,17 @@ const videos = createVideoService({
   emit: job => { if (win && !win.isDestroyed()) win.webContents.send('video:progress', job); },
 });
 handle('video:start', options => videos.start(options || {}));
+// Game clips Harbour downloaded: how much space they take, and deleting them all (data\media\<console>\videos).
+const clipFolders = () => { try { return fs.readdirSync(path.join(DATA, 'media'), { withFileTypes: true }).filter(e => e.isDirectory() && !e.name.startsWith('_')).map(e => path.join(DATA, 'media', e.name, 'videos')).filter(d => fs.existsSync(d)); } catch { return []; } };
+const folderSize = dir => fs.readdirSync(dir, { withFileTypes: true }).reduce((n, e) => n + (e.isDirectory() ? folderSize(path.join(dir, e.name)) : fs.statSync(path.join(dir, e.name)).size), 0);
+handle('video:usage', () => clipFolders().reduce((n, d) => n + folderSize(d), 0));
+handle('video:clearAll', async () => {
+  videos.cancel();
+  let freed = 0;
+  for (const d of clipFolders()) { freed += folderSize(d); await fsp.rm(d, { recursive: true, force: true }); }
+  log(`deleted all game clips (${Math.round(freed / 1048576)} MB)`);
+  return freed;
+});
 handle('video:status', () => videos.status());
 handle('video:cancel', () => { videos.cancel(); return true; });
 handle('art:start', options => artwork.start(options));
