@@ -11,6 +11,8 @@ const CATALOG = [
     exe: 'pcsx2-qt.exe', args: '-batch -nogui -fullscreen {rom}', portable: 'portable.txt' },
   { id: 'rpcs3', name: 'RPCS3', consoles: ['ps3'], source: { type: 'github', repo: 'RPCS3/rpcs3-binaries-win' },
     exe: 'rpcs3.exe', args: '--no-gui {rom}', note: 'Needs the PS3 firmware, installed once from its File menu.' },
+  { id: 'shadps4', name: 'shadPS4', consoles: ['ps4'], source: { type: 'github', repo: 'shadps4-emu/shadPS4', asset: 'win64-sdl.*\\.zip$' },
+    exe: 'shadPS4.exe', args: '-g {rom}', note: 'Plays PS4 games as folders (the one with eboot.bin in it).' },
   { id: 'ppsspp', name: 'PPSSPP', consoles: ['psp'], source: { type: 'github', repo: 'hrydgard/ppsspp' },
     exe: 'PPSSPPWindows64.exe', args: '--fullscreen {rom}' },
   { id: 'xemu', name: 'xemu', consoles: ['xbox'], source: { type: 'github', repo: 'xemu-project/xemu' },

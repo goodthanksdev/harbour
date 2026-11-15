@@ -312,6 +312,13 @@ async function walkRoms(dir, exts, depth = 0, out = [], rootEntries) {
       return out;
     }
   }
+  // PS4 games are folders too: eboot.bin, with the game's name in sce_sys/param.sfo (folders are often just "CUSA01234").
+  const eboot = exts.includes('.pkg') && entries.find(e => e.isFile() && e.name.toLowerCase() === 'eboot.bin');
+  if (eboot) {
+    const title = (await ps4Title(dir)) || path.basename(dir);
+    out.push({ name: title.replace(/[™®©]/g, '').replace(/[<>:"/\\|?*\x00-\x1f]+/g, ' ').replace(/\s+/g, ' ').trim() + '.dump', path: path.join(dir, eboot.name), size: 9e9, dump: true });
+    return out;
+  }
   for (const e of entries) {
     const p = path.join(dir, e.name);
     if (e.isDirectory()) { if (depth < 4 && !SKIP_DIRS.test(e.name)) await walkRoms(p, exts, depth + 1, out); }
@@ -322,6 +329,22 @@ async function walkRoms(dir, exts, depth = 0, out = [], rootEntries) {
   return out;
 }
 
+// A PS4 game's name from its param.sfo: a small table of keys and values; TITLE is the name.
+async function ps4Title(dir) {
+  try {
+    const b = await fsp.readFile(path.join(dir, 'sce_sys', 'param.sfo'));
+    if (b.length < 20 || b.toString('latin1', 0, 4) !== '\x00PSF') return null;
+    const keys = b.readUInt32LE(8), data = b.readUInt32LE(12), count = b.readUInt32LE(16);
+    for (let i = 0; i < count && 20 + i * 16 + 16 <= b.length; i++) {
+      const at = 20 + i * 16;
+      const keyStart = keys + b.readUInt16LE(at), keyEnd = b.indexOf(0, keyStart);
+      if (b.toString('latin1', keyStart, keyEnd) !== 'TITLE') continue;
+      const start = data + b.readUInt32LE(at + 12), len = b.readUInt32LE(at + 4);
+      return b.toString('utf8', start, start + len).replace(/\0+$/, '').trim() || null;
+    }
+  } catch {}
+  return null;
+}
 // Loose key for matching names across naming schemes: "Pokémon - Ruby (U) [!]" -> "pokemonruby".
 const looseKey = s => cleanTitle(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
   .replace(/&|\band\b|\bthe\b/g, '').replace(/[^a-z0-9]/g, '');
@@ -1264,6 +1287,7 @@ const EMU_SETUP = [
   { exe: /^rpcs3\.exe$/i, fullscreen: ['--fullscreen'], only: args => args.includes('--no-gui') },  // RPCS3's switch needs --no-gui
   { exe: /^(eden|lichii|yuzu|citron|suyu|sudachi|torzu)\.exe$/i, fullscreen: ['-f'] },
   { exe: /^rmg\.exe$/i, fullscreen: ['--fullscreen'] },
+  { exe: /^shadps4\.exe$/i, fullscreen: ['-f', 'true'] },
   { exe: /^ppsspp.*\.exe$/i, fullscreen: ['--fullscreen'] },
   { exe: /^xenia.*\.exe$/i, fullscreen: ['--fullscreen'] },
   { exe: /^cemu\.exe$/i, fullscreen: ['-f'] },

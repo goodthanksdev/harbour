@@ -508,9 +508,8 @@ async function renderEmulators() {
       catch (e) { UISound.play('error'); toast(e.message); }
     };
     row.append(label, pick);
-    // Games that need an emulator but none is set: offer the well-known one for this console.
-    const needOne = S.games.some(g => g.system === s.id && !g.recomp);
-    const offer = needOne && !pick.value && catalog.find(c => c.consoles.includes(s.id) && !c.installed);
+    // No emulator set: offer the well-known one for this console, even before there are games for it.
+    const offer = !s.direct && !pick.value && catalog.find(c => c.consoles.includes(s.id) && !c.installed);
     if (offer) {
       const b = el('button', 'primary', `Install ${offer.name}`); b.type = 'button';
       b.onclick = async () => { await installEmulator(offer, b); renderEmulators(); };
