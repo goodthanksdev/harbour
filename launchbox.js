@@ -172,6 +172,7 @@ function createLaunchBox({ dataDir, normalize, download, onStatus = () => {},
   const indexFile = path.join(folder, 'launchbox-index.json');
   const metaFolder = path.join(folder, 'launchbox-meta');
   let current = null;              // the index, or the promise of it
+  let building = null;             // a download and rebuild of the index under way
   const metaByPlatform = new Map();
 
   async function readIndex() {
@@ -211,9 +212,12 @@ function createLaunchBox({ dataDir, normalize, download, onStatus = () => {},
     const age = ageOfIndex();
     const stale = age >= REFRESH_AFTER || (refresh && age >= 864e5);
     if (current && !stale) return current;
+    // One download at a time: on a first run every picture asks at once, and each would otherwise start its own
+    // 100 MB download into the same file (they'd break each other, and that run would get no LaunchBox pictures).
+    if (building) return building;
     const job = (stale ? Promise.reject() : readIndex()).catch(() => rebuild());
-    current = job;
-    job.catch(() => { if (current === job) current = null; });
+    current = building = job;
+    job.catch(() => { if (current === job) current = null; }).finally(() => { if (building === job) building = null; });
     return job;
   }
 
