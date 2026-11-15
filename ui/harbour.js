@@ -644,7 +644,7 @@ function openSettings() {
   $('#setUnhide').textContent = hidden ? `Show (${hidden})` : 'None';
   $('#setUnhide').disabled = !hidden;
   $('#setIdle').value = String(S.config.harbourIdle ?? 120);
-  $('#setVideosOn').value = videosOn() ? '1' : '0'; $('#setVideos').disabled = !videosOn();
+  $('#setVideosOn').value = videosOn() ? '1' : '0';
   // How much space the clips take, on the Delete button.
   $('#setClearVideos').textContent = 'Delete all'; $('#setClearVideos').disabled = true;
   api.videoUsage().then(bytes => { $('#setClearVideos').textContent = `Delete all (${sizeText(bytes)})`; $('#setClearVideos').disabled = !bytes; }).catch(() => {});
@@ -690,13 +690,13 @@ $('#setUnhide').onclick = async () => {
   $('#settings').close(); buildTabs(); setTab(S.tab, true); toast('Hidden games are back.');
 };
 $('#setCheck').onclick = () => { $('#settings').close(); checkUpdates(true); };
-$('#setArt').onclick = () => { $('#settings').close(); downloadArt('library'); };
-$('#setVideos').onclick = () => { $('#settings').close(); downloadVideos('library'); };
+// Artwork and clips download by themselves (autoMedia), so there are no buttons for them.
 const sizeText = b => b >= 1073741824 ? `${(b / 1073741824).toFixed(1)} GB` : `${Math.max(1, Math.round(b / 1048576))} MB`;
 $('#setVideosOn').onchange = e => {
   const on = e.target.value === '1';
-  saveSetting({ harbourVideos: on }); $('#setVideos').disabled = !on;
-  if (on) startVideoSoon(S.list[S.sel]); else stopVideo();
+  saveSetting({ harbourVideos: on });
+  // Back on: play the clip, and fetch the missing ones (by themselves, like always).
+  if (on) { startVideoSoon(S.list[S.sel]); downloadVideos('library', '', 'missing'); } else stopVideo();
 };
 // Deleting them also switches videos off: otherwise Harbour would just download them all again.
 $('#setClearVideos').onclick = async () => {
@@ -705,7 +705,7 @@ $('#setClearVideos').onclick = async () => {
   try {
     const freed = await api.videoClearAll();
     await saveSetting({ harbourVideos: false });
-    $('#setVideosOn').value = '0'; $('#setVideos').disabled = true;
+    $('#setVideosOn').value = '0';
     $('#setClearVideos').textContent = 'Delete all'; $('#setClearVideos').disabled = true;
     toast(`Clips deleted: ${sizeText(freed)} freed.`, 5000);
     await reload();
