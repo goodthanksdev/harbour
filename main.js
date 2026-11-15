@@ -205,8 +205,10 @@ const SCAN_CONCURRENCY = 16;
 const stem = f => path.basename(f, path.extname(f)).toLowerCase();
 const fileUrl = p => (p ? pathToFileURL(p).href : null);
 
+// Leftover format tags in a file name: "Crash Nitro Kart (USA).xiso.iso" leaves ".xiso" once ".iso" is taken off.
+const FORMAT_TAG = /(\.(xiso|iso|cso|zso|chd|rvz|wbfs|gcm|ciso|nsp|xci|nsz|bin|cue|img|z64|n64|v64|nds|3ds|cia|gba|gbc|gb|sfc|smc|nes))+$/i;
 function cleanTitle(name) {
-  return name.replace(/\s*[\(\[][^\)\]]*[\)\]]/g, '')
+  return name.replace(FORMAT_TAG, '').replace(/\s*[\(\[][^\)\]]*[\)\]]/g, '')
     .replace(/_/g, ' ')
     .replace(/^\d{3,5}\s*-?\s+(?=\S)/, '')          // release numbers: "0004 - Zelda", "1158 Zelda"
     .replace(/\s*\b(decrypted|encrypted)\b\s*$/i, '')

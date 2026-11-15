@@ -1012,9 +1012,11 @@ function autoMedia() {
   let tried = {};
   try { tried = JSON.parse(localStorage.getItem('harbourAutoTried') || '{}'); } catch {}
   const now = Date.now();
-  const fresh = S.games.filter(g => !g.demo && (!g.media?.front || !g.media?.video) && !(now - (tried[g.id] || 0) < AUTO_RETRY_MS));
+  // Tried per name: a game whose name changed (renamed, or read better) is tried again straight away.
+  const key = g => `${g.id}|${g.title}`;
+  const fresh = S.games.filter(g => !g.demo && (!g.media?.front || !g.media?.video) && !(now - (tried[key(g)] || 0) < AUTO_RETRY_MS));
   if (!fresh.length) return;
-  for (const g of fresh) tried[g.id] = now;
+  for (const g of fresh) tried[key(g)] = now;
   try { localStorage.setItem('harbourAutoTried', JSON.stringify(tried)); } catch {}
   // Artwork first, then clips: the queue keeps that order.
   if (fresh.some(g => !g.media?.front)) downloadArt('library');
