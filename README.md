@@ -22,7 +22,9 @@ side by side on their real console's shelf, kept up to date for you.
 - **Emulators in a click.** Harbour knows the well-known emulator for each console (RMG, DuckStation, PCSX2, RPCS3,
   PPSSPP, xemu, Xenia Canary, Dolphin, melonDS, Azahar, mGBA, Cemu, Eden, Lichii, Flycast, Snes9x, Mesen). Add a
   games folder, or press Play on a game with no emulator, and Harbour installs the right one from its official
-  releases and sets it up. Emulators with no controller buttons set get a standard pad layout, and a Steam
+  releases and sets it up. Games open fullscreen, drawn at a resolution that fits your screen (on a 1440p screen:
+  PS2, GameCube and Xbox at 3×, PS1 at 6×, DS at 8×) instead of the console's own blurry one; change it in the
+  emulator and your choice stays. Emulators with no controller buttons set get a standard pad layout, and a Steam
   Controller works through Steam.
 
   ![Installing emulators](docs/emulators.png)

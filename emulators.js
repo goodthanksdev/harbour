@@ -1,14 +1,14 @@
 // Well-known emulators Harbour can install by itself: where their Windows builds are released, which program starts
 // them, and how to start a game in them. Harbour picks the Windows download from each release (unless `asset` says
 // which), checks and unpacks it into its Emulators folder, sets it up for its consoles and keeps it updated.
-// `args`: {rom} is the game file.
+// `args`: {rom} is the game file. `portable`: a file that makes it keep its settings in its own folder.
 const CATALOG = [
   { id: 'rmg', name: 'RMG', consoles: ['n64'], source: { type: 'github', repo: 'Rosalie241/RMG' },
     exe: 'RMG.exe', args: '--fullscreen --quit-after-emulation {rom}' },
   { id: 'duckstation', name: 'DuckStation', consoles: ['ps1'], source: { type: 'github', repo: 'stenzek/duckstation' },
-    exe: 'duckstation-qt-x64-ReleaseLTCG.exe', args: '-batch -fullscreen {rom}' },
+    exe: 'duckstation-qt-x64-ReleaseLTCG.exe', args: '-batch -fullscreen {rom}', portable: 'portable.txt' },
   { id: 'pcsx2', name: 'PCSX2', consoles: ['ps2'], source: { type: 'github', repo: 'PCSX2/pcsx2' },
-    exe: 'pcsx2-qt.exe', args: '-batch -nogui -fullscreen {rom}' },
+    exe: 'pcsx2-qt.exe', args: '-batch -nogui -fullscreen {rom}', portable: 'portable.txt' },
   { id: 'rpcs3', name: 'RPCS3', consoles: ['ps3'], source: { type: 'github', repo: 'RPCS3/rpcs3-binaries-win' },
     exe: 'rpcs3.exe', args: '--no-gui {rom}', note: 'Needs the PS3 firmware, installed once from its File menu.' },
   { id: 'ppsspp', name: 'PPSSPP', consoles: ['psp'], source: { type: 'github', repo: 'hrydgard/ppsspp' },
@@ -26,7 +26,7 @@ const CATALOG = [
   { id: 'cemu', name: 'Cemu', consoles: ['wiiu'], source: { type: 'github', repo: 'cemu-project/Cemu' },
     exe: 'Cemu.exe', args: '-f -g {rom}', note: 'Needs your Wii U keys, added once in its settings.' },
   { id: 'dolphin', name: 'Dolphin', consoles: ['gc', 'wii'], source: { type: 'dolphin', repo: 'dolphin-emu/dolphin' },
-    exe: 'Dolphin.exe', args: '-b -C Dolphin.Display.Fullscreen=True -e {rom}' },
+    exe: 'Dolphin.exe', args: '-b -C Dolphin.Display.Fullscreen=True -e {rom}', portable: 'portable.txt' },
   { id: 'eden', name: 'Eden', consoles: ['switch'], source: { type: 'forgejo', host: 'git.eden-emu.dev', repo: 'eden-emu/eden' },
     exe: 'eden.exe', args: '-g {rom}', note: 'Needs your Switch keys and firmware, added once in its settings.' },
   { id: 'lichii', name: 'Lichii', consoles: ['switch2'], source: { type: 'github', repo: 'zortos293/Lichii' },

@@ -1218,6 +1218,105 @@ function discFile(game, sys, index) {
   fs.writeFileSync(file, order.join('\n') + '\n');
   return file;
 }
+// ---------- Emulator setup: fullscreen and a sharp picture ----------
+// Every emulator Harbour starts a game in opens fullscreen, and draws at a resolution that fits this screen instead
+// of the console's own (480 lines on a PS2, stretched up). Works for emulators you added too: they're known by their
+// program's name. The resolution is set once per settings file and screen size, so a change you make inside the
+// emulator stays (until the screen changes). Emulators that already draw at the screen's resolution (RMG, PPSSPP)
+// and ones too heavy to push further on most PCs (Switch, Wii U, PS3, Xbox 360) are left as they are.
+
+// The console's own picture height, and the most Harbour scales it up (a cap so older GPUs keep full speed).
+const NATIVE_LINES = { ps1: 240, n64: 240, ps2: 480, gc: 480, wii: 480, xbox: 480, dreamcast: 480, psp: 272, nds: 192, '3ds': 240 };
+const MAX_SCALE = { ps1: 8, ps2: 4, gc: 4, wii: 4, xbox: 3, dreamcast: 4, nds: 8, '3ds': 5 };
+function resolutionScale(sysId) {
+  if (!NATIVE_LINES[sysId] || !MAX_SCALE[sysId]) return 0;
+  let height = 1080;
+  try {
+    const { screen } = require('electron');
+    const d = win && !win.isDestroyed() ? screen.getDisplayMatching(win.getBounds()) : screen.getPrimaryDisplay();
+    height = Math.round(d.size.height * d.scaleFactor);
+  } catch {}
+  return Math.max(1, Math.min(MAX_SCALE[sysId], Math.round(height / NATIVE_LINES[sysId])));
+}
+const appData = () => process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming');
+const localAppData = () => process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
+const documents = () => { try { return app.getPath('documents'); } catch { return path.join(os.homedir(), 'Documents'); } };
+// What each emulator needs: its fullscreen switch, and how to set its resolution (a launch option, or a settings
+// file: the first of `files` that exists, with section -> key -> value).
+const EMU_SETUP = [
+  { exe: /^dolphin\.exe$/i, fullscreen: ['-C', 'Dolphin.Display.Fullscreen=True'], args: s => ['-C', `GFX.Settings.InternalResolution=${s}`] },
+  { exe: /^flycast\.exe$/i, fullscreen: ['-config', 'window:fullscreen=yes'], args: s => ['-config', `config:rend.Resolution=${480 * s}`] },
+  { exe: /^pcsx2.*\.exe$/i, fullscreen: ['-fullscreen'],
+    files: dir => [path.join(dir, 'inis', 'PCSX2.ini'), path.join(documents(), 'PCSX2', 'inis', 'PCSX2.ini')],
+    values: s => ({ 'EmuCore/GS': { upscale_multiplier: s } }) },
+  { exe: /^duckstation.*\.exe$/i, fullscreen: ['-fullscreen'],
+    files: dir => [path.join(dir, 'settings.ini'), path.join(localAppData(), 'DuckStation', 'settings.ini'), path.join(documents(), 'DuckStation', 'settings.ini')],
+    values: s => ({ GPU: { ResolutionScale: s } }) },
+  { exe: /^melonds\.exe$/i, fullscreen: ['-f'],
+    files: dir => [path.join(dir, 'melonDS.toml'), path.join(appData(), 'melonDS', 'melonDS.toml')],
+    values: s => ({ '3D': { Renderer: 1 }, '3D.GL': { ScaleFactor: s } }) },  // the OpenGL renderer can scale; software can't
+  { exe: /^xemu\.exe$/i, fullscreen: ['-full-screen'],
+    files: dir => [path.join(dir, 'xemu.toml'), path.join(appData(), 'xemu', 'xemu', 'xemu.toml')],
+    values: s => ({ 'display.quality': { surface_scale: s } }) },
+  { exe: /^(azahar|citra-qt|lime3ds)\.exe$/i, fullscreen: ['-f'],
+    files: dir => [path.join(dir, 'user', 'config', 'qt-config.ini'), path.join(appData(), 'Azahar', 'config', 'qt-config.ini')],
+    values: s => ({ Renderer: { 'resolution_factor\\default': 'false', resolution_factor: s } }) },
+  { exe: /^rpcs3\.exe$/i, fullscreen: ['--fullscreen'], only: args => args.includes('--no-gui') },  // RPCS3's switch needs --no-gui
+  { exe: /^(eden|lichii|yuzu|citron|suyu|sudachi|torzu)\.exe$/i, fullscreen: ['-f'] },
+  { exe: /^rmg\.exe$/i, fullscreen: ['--fullscreen'] },
+  { exe: /^ppsspp.*\.exe$/i, fullscreen: ['--fullscreen'] },
+  { exe: /^xenia.*\.exe$/i, fullscreen: ['--fullscreen'] },
+  { exe: /^cemu\.exe$/i, fullscreen: ['-f'] },
+  { exe: /^mgba\.exe$/i, fullscreen: ['-f'] },
+  { exe: /^snes9x.*\.exe$/i, fullscreen: ['-fullscreen'] },
+  { exe: /^mesen\.exe$/i, fullscreen: ['--fullscreen'] },
+];
+const setupFor = exe => EMU_SETUP.find(x => x.exe.test(path.basename(exe)));
+// Sets key = value lines inside [section] blocks of an ini/TOML-style file, adding what's missing. Keeps the rest.
+function setFileValues(file, sections) {
+  const text = fs.readFileSync(file, 'utf8'), nl = text.includes('\r\n') ? '\r\n' : '\n';
+  const lines = text.split(/\r?\n/);
+  const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  for (const [section, values] of Object.entries(sections)) {
+    let start = lines.findIndex(l => l.trim() === `[${section}]`);
+    if (start < 0) { if (lines.length && lines[lines.length - 1].trim() !== '') lines.push(''); lines.push(`[${section}]`); start = lines.length - 1; }
+    let end = lines.findIndex((l, i) => i > start && /^\s*\[/.test(l));
+    if (end < 0) end = lines.length;
+    for (const [key, value] of Object.entries(values)) {
+      const at = lines.findIndex((l, i) => i > start && i < end && new RegExp(`^\\s*${esc(key)}\\s*=`).test(l));
+      if (at >= 0) lines[at] = `${key} = ${value}`;
+      else { lines.splice(start + 1, 0, `${key} = ${value}`); end++; }
+    }
+  }
+  fs.writeFileSync(file, lines.join(nl));
+}
+// The launch options for a game: the emulator's own, plus its fullscreen switch and resolution when they're missing.
+// Settings files are written here too (before the game starts, and again after it closes, for an emulator whose
+// settings file only appears on its first run).
+function emulatorSetup(exe, sysId, args) {
+  padDefaults(exe);
+  const s = setupFor(exe);
+  if (!s) return args;
+  // Added at the front: some emulators stop reading options at the game file, and options like "-dvd_path <file>"
+  // must stay together.
+  let out = [...args];
+  const present = flag => out.some(a => a.toLowerCase() === flag.toLowerCase());
+  if (s.fullscreen && (!s.only || s.only(out)) && !s.fullscreen.every(present)) out = [...s.fullscreen, ...out];
+  const scale = resolutionScale(sysId);
+  if (scale && s.args) out = [...s.args(scale), ...out];
+  if (scale && s.files) tuneFile(exe, s, scale);
+  return out;
+}
+function tuneFile(exe, s, scale) {
+  const file = s.files(path.dirname(exe)).find(f => fs.existsSync(f));
+  if (!file) return;
+  config.tuned ||= {};
+  const key = file.toLowerCase();
+  if (config.tuned[key] === scale) return;  // set already; a change made in the emulator since then stays
+  try { setFileValues(file, s.values(scale)); config.tuned[key] = scale; saveConfig(config); log(`set ${path.basename(exe)} to ${scale}x resolution (${file})`); }
+  catch (e) { log(`couldn't set ${path.basename(exe)}'s resolution: ${e.message}`); }
+}
+
 function launchGame(gameId, options = {}) {
   // The ROM path always comes from the scanned library, never from the renderer.
   const game = libraryGames.find(g => g.id === gameId);
@@ -1239,12 +1338,13 @@ function launchGame(gameId, options = {}) {
   const tpl = emuDef(emuId).args || '{rom}';
   const rom = discFile(game, sys, disc);
   // split/join instead of replace(): "$&", "$$" etc. in a filename must stay literal.
-  const args = splitArgs(tpl).map(a => a.split('{rom}').join(rom));
+  const args = emulatorSetup(exe, sys.id, splitArgs(tpl).map(a => a.split('{rom}').join(rom)));
   return new Promise((resolve, reject) => {
     // detached: the game keeps running if Harbour is closed or restarted while playing.
-    padDefaults(exe);
     const child = spawn(exe, args, { cwd: path.dirname(exe), env: launchEnv(), detached: true, stdio: 'ignore' });
     child.once('error', e => reject(new Error(`Launch failed: ${e.message}`)));
+    // An emulator's settings file can first appear when it closes: set its resolution then, for next time.
+    child.once('exit', () => { const s = setupFor(exe), scale = resolutionScale(sys.id); if (s?.files && scale) tuneFile(exe, s, scale); });
     child.once('spawn', () => { track(game, child); child.unref(); resolve(true); });
   });
 }
@@ -1683,6 +1783,8 @@ handle('harbour:installEmulator', async catalogId => {
     look(folder, 0);
     exe ||= guessProgram(folder, c.source.repo);
     if (!exe) throw new Error(`${c.name} was downloaded, but its program wasn't found in it.`);
+    // Portable mode: its settings live in its own folder, where Harbour can find them.
+    if (c.portable && !fs.existsSync(path.join(path.dirname(exe), c.portable))) fs.writeFileSync(path.join(path.dirname(exe), c.portable), '');
     const id = 'custom-' + c.id;
     config.customEmulators = config.customEmulators.filter(e => e.id !== id);
     config.customEmulators.push({ id, name: c.name, exe, args: c.args, systems: [...c.consoles],
