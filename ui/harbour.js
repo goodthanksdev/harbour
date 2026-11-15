@@ -493,7 +493,8 @@ async function renderEmulators() {
   const mine = all;
   // Consoles worth listing: ones with games, or ones an emulator is set up for.
   const counts = {}; for (const g of S.games) counts[g.system] = (counts[g.system] || 0) + 1;
-  const listed = consoles().filter(s => counts[s.id] || mine.some(e => (e.systems || []).includes(s.id)));
+  const pending = installsPending();
+  const listed = consoles().filter(s => counts[s.id] || mine.some(e => (e.systems || []).includes(s.id)) || pending.some(c => c.consoles.includes(s.id)));
   const catalog = await api.emulatorCatalog().catch(() => []);
   const rows = listed.map(s => {
     const row = el('div', 'emu-console');
@@ -510,13 +511,19 @@ async function renderEmulators() {
     row.append(label, pick);
     // Games that need an emulator but none is set: offer the well-known one for this console.
     const needOne = S.games.some(g => g.system === s.id && !g.recomp);
-    const offer = needOne && !pick.value && catalog.find(c => c.consoles.includes(s.id) && !c.installed);
+    const busy = !pick.value && pending.find(c => c.consoles.includes(s.id));
+    const offer = !busy && needOne && !pick.value && catalog.find(c => c.consoles.includes(s.id) && !c.installed);
+    if (busy) {
+      // Being installed (or waiting its turn): it leaves the list again if the install fails and there are no games.
+      const b = el('button', 'busy', installState(busy.id) === 'installing' ? `Installing ${busy.name}…` : `${busy.name}: queued`); b.type = 'button'; b.disabled = true;
+      row.append(b);
+    }
     if (offer) {
       // Say why the button is there: these games can't start until it's installed.
       label.querySelector('small')?.remove();
       label.append(el('small', 'need', ` · ${counts[s.id]} game${counts[s.id] === 1 ? '' : 's'}, no emulator`));
       const b = el('button', 'primary', `Install ${offer.name}`); b.type = 'button';
-      b.onclick = async () => { await installEmulator(offer, b); renderEmulators(); };
+      b.onclick = () => installEmulator(offer);
       row.append(b);
     }
     return row;
@@ -551,7 +558,7 @@ async function renderEmulators() {
     }, 'danger');
     card.append(head, chips, upd, btns); return card;
   });
-  $('#emuCards').replaceChildren(...(cards.length ? cards : [el('p', 'note', 'No emulators yet. Add one below.')]));
+  $('#emuCards').replaceChildren(...(cards.length ? cards : [el('p', 'note', 'No emulators yet.')]));
   renderGameFolders();
 }
 const sourceText = src => !src ? null : src.type === 'dolphin' ? 'dolphin-emu.org' : src.type === 'github' ? src.repo : `${src.host}/${src.repo}`;
@@ -940,6 +947,7 @@ async function init() {
   // The finished tick comes from updateOne()/update(), which know the new version.
   api.onRecompProgress?.(p => {
     if (p.done) return;
+    if (String(p.gameId).startsWith('install:')) { installs.stage = p.stage; installs.pct = p.pct; showInstallBadge(); return; }
     Activity.set('update', `${S.updatingName ? S.updatingName + ': ' : ''}${p.stage}${p.pct && p.pct < 1 ? ` ${Math.round(p.pct * 100)}%` : ''}`, p.pct);
     // The running update's button in the Updates window shows how far it is.
     S.updProgress = p.pct && p.pct < 1 ? `${Math.round(p.pct * 100)}%` : /install/i.test(p.stage) ? 'Installing…' : 'Updating…';
@@ -968,22 +976,19 @@ async function showEmuCatalog() {
     const card = el('div', 'emu-cat');
     const info = el('div', 'emu-cat-info');
     info.append(el('b', '', c.name), el('small', '', c.consoles.map(sysName).join(', ') + (c.note ? ` · ${c.note}` : '')));
-    const btn = el('button', c.installed ? '' : 'primary', c.installed ? 'Installed' : 'Install');
-    btn.type = 'button'; btn.disabled = !!c.installed;
-    btn.onclick = () => installEmulator(c, btn);
+    const btn = el('button'); btn.type = 'button'; btn.dataset.id = c.id; btn.dataset.installed = c.installed ? '1' : '';
+    btn.onclick = () => installEmulator(c);
+    catalogButton(btn);
     card.append(info, btn);
     return card;
   }));
   $('#emuCatalog').querySelector('button:not([disabled])')?.focus();
 }
 // Installs the catalogue's emulator for each of these consoles that has none. True when they all have one after.
-let installingFor = null;
 async function installFor(systems) {
-  if (installingFor) { toast('An emulator is already installing.'); return false; }
   const catalog = await api.emulatorCatalog().catch(() => []);
   const picks = [...new Set(systems.map(id => catalog.find(c => c.consoles.includes(id))).filter(Boolean))];
   if (!picks.length) { toast(`No emulator Harbour knows plays ${systems.map(sysName).join(', ')}. Add one with ＋ → Emulator.`, 6000); return false; }
-  installingFor = true;
   try {
     for (const c of picks) {
       // Installed already but not set for this console: just use it.
@@ -993,26 +998,63 @@ async function installFor(systems) {
     const ok = systems.every(id => emuDef(id));
     if (!ok) toast("The emulator is set up but its program wasn't found. Fix it in Settings → Emulators.", 6000);
     return ok;
-  } finally { installingFor = null; renderRow(); select(S.sel, true); }
+  } finally { renderRow(); select(S.sel, true); }
 }
 const emuDef = sysId => (S.emus || []).some(e => e.id === S.config.systems.find(s => s.id === sysId)?.emulator && e.exe);
-async function installEmulator(c, btn) {
-  if (btn) { btn.disabled = true; btn.classList.add('busy'); btn.textContent = 'Installing…'; }
-  S.updatingName = c.name;
-  Activity.set('update', `Installing ${c.name}…`);
+// Emulator installs wait their turn and run one at a time (each is a big download), so adding several at once is
+// fine. One quiet badge shows the one installing and how many are waiting. Resolves true once it's installed.
+const installs = { queue: [], current: null, done: new Set(), stage: '', pct: 0 };
+const installState = id => installs.current?.c.id === id ? 'installing' : installs.queue.some(j => j.c.id === id) ? 'queued' : installs.done.has(id) ? 'installed' : null;
+const installsPending = () => [installs.current, ...installs.queue].filter(Boolean).map(j => j.c);
+function installEmulator(c) {
+  const known = [installs.current, ...installs.queue].find(j => j?.c.id === c.id);
+  if (known) return known.promise;
+  const job = { c };
+  job.promise = new Promise(resolve => { job.resolve = resolve; });
+  installs.queue.push(job);
+  installsChanged(); runInstalls();
+  return job.promise;
+}
+async function runInstalls() {
+  if (installs.current || !installs.queue.length) return;
+  const job = installs.current = installs.queue.shift();
+  installs.stage = ''; installs.pct = 0;
+  installsChanged();
+  let ok = false;
   try {
-    const r = await api.installEmulator(c.id);
-    UISound.play('select');
-    Activity.done('update', `${c.name} installed${r.note ? `: ${r.note}` : ''}`);
+    const r = await api.installEmulator(job.c.id);
+    ok = true; installs.done.add(job.c.id); UISound.play('select');
+    document.querySelectorAll(`#emuCatalog button[data-id="${job.c.id}"]`).forEach(b => { b.dataset.installed = '1'; });
+    if (r.note) toast(`${job.c.name}: ${r.note}`, 6000);
     S.config = await api.getConfig();
     await loadEmulators(false); renderRow(); select(S.sel, true);
-    if (btn) { btn.classList.remove('busy'); btn.textContent = 'Installed'; }
-    return true;
   } catch (e) {
-    UISound.play('error'); Activity.fail('update', `${c.name}: ${e.message}`);
-    if (btn) { btn.disabled = false; btn.classList.remove('busy'); btn.textContent = 'Install'; }
-    return false;
+    UISound.play('error'); Activity.fail('install-' + job.c.id, `${job.c.name}: ${e.message}`);
   }
+  installs.current = null; job.resolve(ok);
+  if (!installs.queue.length) {
+    const n = installs.done.size;
+    if (ok) Activity.done('install', n > 1 ? `${n} emulators installed` : `${job.c.name} installed`); else Activity.end('install', '', 'ok', '', 1);
+    installs.done.clear();
+  }
+  installsChanged(); runInstalls();
+}
+function showInstallBadge() {
+  const j = installs.current; if (!j) return;
+  const pct = installs.pct > 0 && installs.pct < 1 ? ` ${Math.round(installs.pct * 100)}%` : '';
+  Activity.set('install', `Installing ${j.c.name}${pct}` + (installs.queue.length ? ` · ${installs.queue.length} queued` : ''), installs.pct);
+}
+function catalogButton(btn) {
+  const st = btn.dataset.installed ? 'installed' : installState(btn.dataset.id);
+  btn.className = st ? (st === 'installed' ? '' : 'busy') : 'primary';
+  btn.textContent = { installed: 'Installed', installing: 'Installing…', queued: 'Queued' }[st] || 'Install';
+  btn.disabled = !!st;
+}
+// Everything that shows installs: the badge, the install list's buttons, and Manage.
+function installsChanged() {
+  showInstallBadge();
+  document.querySelectorAll('#emuCatalog button[data-id]').forEach(catalogButton);
+  if ($('#emusDlg').open) renderEmulators();
 }
 // From the install list back to your emulators (Manage), and the other way with "＋ Add emulators".
 $('#emuManage').onclick = () => { UISound.play('select'); $('#addDlg').close(); openEmulators(); };
