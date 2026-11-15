@@ -292,7 +292,10 @@ function showGame(g) {
   if (!S.installingFor) playBtn.replaceChildren(...(offer ? [`Install ${offer.name}`] : [el('span', 'tri'), 'Play']));
   const hint = $('#hints span'); if (hint?.lastChild) hint.lastChild.textContent = offer ? 'Install' : 'Play';
   // A PC port of this game exists (the catalogue, same game and console): say so, next to Play. Otherwise nothing.
-  $('#btnPort').hidden = !portsFor(g).length;
+  // It says how well the best of them runs, so "Experimental" tells you not to bother yet.
+  const ports = portsFor(g), best = ports.map(x => x.status).sort((a, b) => (TIER[a] ?? 3) - (TIER[b] ?? 3))[0];
+  $('#btnPort').hidden = !ports.length;
+  if (ports.length) $('#btnPort').textContent = `Install PC port · ${STATUS[best] || best}`;
   const up = $('#btnUpdate');
   up.hidden = !st?.updateAvailable; up.className = 'new';
   up.textContent = st?.updateAvailable ? (st.auto ? `⬆ Update to ${st.latest.tag}` : `${st.latest.tag}: update in app`) : '';
