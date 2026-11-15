@@ -21,10 +21,10 @@
 
 | | |
 |---|---|
-| <img src="docs/legend/emu-ok.png" width="26"> | Emulator ready |
-| <img src="docs/legend/emu-update.png" width="26"> | Emulator has an update |
-| <img src="docs/legend/emu-missing.png" width="26"> | No emulator yet: Play installs it |
-| <img src="docs/legend/port-update.png" width="52"> | PC port has an update |
+| <img src="docs/legend/emu-ok.png" width="48"> | Emulator up to date |
+| <img src="docs/legend/emu-update.png" width="48"> | Emulator has an update |
+| <img src="docs/legend/emu-missing.png" width="48"> | No emulator yet |
+| <img src="docs/legend/port-update.png" width="110"> | PC port has an update |
 
 ## Get it
 
