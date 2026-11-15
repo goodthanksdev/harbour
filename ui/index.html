@@ -60,18 +60,19 @@
 
   <dialog id="settings">
     <h2>Settings</h2>
+    <h3>Library</h3>
     <div class="set-row"><span>Emulators &amp; game folders</span><button id="setEmus">Manage</button></div>
-    <div class="set-row"><span>Artwork</span><button id="setArt">Download covers, backgrounds and logos</button></div>
-    <div class="set-row"><span>Game videos</span><select id="setVideosOn"><option value="1">On</option><option value="0">Off (cover art only)</option></select></div>
-    <div class="set-row"><span>Video clips</span><span class="set-btns"><button id="setVideos">Download for every game</button><button id="setClearVideos">Delete all</button></span></div>
-    <div class="set-row"><span>Video sound</span><select id="setSound"><option value="0">Muted</option><option value="1">With sound</option></select></div>
-    <div class="set-row"><span>Video volume</span><span class="slider"><input type="range" id="setVidVol" min="0" max="100" step="5" /><output id="setVidVolOut"></output></span></div>
-    <div class="set-row"><span>Hidden games</span><button id="setUnhide">Show them again</button></div>
     <div class="set-row"><span>Updates</span><button id="setCheck">Check now</button></div>
-    <div class="set-row"><span>Screensaver</span><select id="setIdle"><option value="0">Off</option><option value="60">After 1 minute</option><option value="120">After 2 minutes</option><option value="300">After 5 minutes</option></select></div>
-    <div class="set-row"><span>UI sounds</span><select id="setUiSound"><option value="1">On</option><option value="0">Off</option></select></div>
-    <div class="set-row"><span>UI sound volume</span><span class="slider"><input type="range" id="setUiVol" min="0" max="100" step="5" /><output id="setUiVolOut"></output></span></div>
-    <div class="set-row"><span>Window</span><button id="setFull">Toggle fullscreen (F11)</button></div>
+    <div class="set-row"><span>Hidden games</span><button id="setUnhide">Show</button></div>
+    <h3>Art &amp; video</h3>
+    <div class="set-row"><span>Artwork</span><button id="setArt">Download all</button></div>
+    <div class="set-row"><span>Game videos</span><select id="setVideosOn"><option value="1">On</option><option value="0">Off</option></select></div>
+    <div class="set-row"><span>Clips</span><span class="set-btns"><button id="setVideos">Download all</button><button id="setClearVideos">Delete all</button></span></div>
+    <div class="set-row"><span>Video sound</span><span class="slider"><input type="range" id="setVidVol" min="0" max="100" step="5" /><output id="setVidVolOut"></output></span></div>
+    <h3>Interface</h3>
+    <div class="set-row"><span>UI sounds</span><span class="slider"><input type="range" id="setUiVol" min="0" max="100" step="5" /><output id="setUiVolOut"></output></span></div>
+    <div class="set-row"><span>Screensaver</span><select id="setIdle"><option value="0">Off</option><option value="60">1 minute</option><option value="120">2 minutes</option><option value="300">5 minutes</option></select></div>
+    <div class="set-row"><span>Fullscreen</span><button id="setFull">F11</button></div>
     <div class="dlg-actions"><button id="setQuit">Quit Harbour</button><button id="setClose" class="primary">Close</button></div>
   </dialog>
 

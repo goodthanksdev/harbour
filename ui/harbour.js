@@ -641,16 +641,14 @@ $('#renameForm').addEventListener('submit', async e => {
 // ---------- settings ----------
 function openSettings() {
   const hidden = S.games.filter(g => g.hidden).length;
-  $('#setUnhide').textContent = hidden ? `Show them again (${hidden})` : 'None hidden';
+  $('#setUnhide').textContent = hidden ? `Show (${hidden})` : 'None';
   $('#setUnhide').disabled = !hidden;
   $('#setIdle').value = String(S.config.harbourIdle ?? 120);
-  $('#setSound').value = S.config.harbourVideoSound ? '1' : '0';
   $('#setVideosOn').value = videosOn() ? '1' : '0'; $('#setVideos').disabled = !videosOn();
   // How much space the clips take, on the Delete button.
   $('#setClearVideos').textContent = 'Delete all'; $('#setClearVideos').disabled = true;
   api.videoUsage().then(bytes => { $('#setClearVideos').textContent = `Delete all (${sizeText(bytes)})`; $('#setClearVideos').disabled = !bytes; }).catch(() => {});
-  $('#setUiSound').value = S.config.harbourUiSound === false ? '0' : '1';
-  $('#setUiVol').value = uiVolume(); $('#setVidVol').value = videoVolume(); showVolumes();
+  showVolumes();
   $('#settings').showModal();
 }
 async function saveSetting(patch) {
@@ -662,17 +660,31 @@ $('#setClose').onclick = () => $('#settings').close();
 $('#setQuit').onclick = () => api.quitApp();
 $('#setFull').onclick = () => api.isFullscreen().then(on => api.setFullscreen(!on));
 $('#setIdle').onchange = e => saveSetting({ harbourIdle: Number(e.target.value) });
-$('#setUiSound').onchange = e => { const on = e.target.value === '1'; saveSetting({ harbourUiSound: on }); UISound.configure({ enabled: on }); if (on) UISound.play('select'); };
 // Volumes are 0-100 and start at 50: loud enough to hear, never a blast at full.
 const uiVolume = () => S.config.harbourUiVolume ?? 50, videoVolume = () => S.config.harbourVideoVolume ?? 50;
 // The built-in blips are generated at 0.5 of full scale, so 50 here is the level they were made for.
 const applyUiVolume = () => UISound.configure({ volume: uiVolume() / 100 * .5 });
-const showVolumes = () => { $('#setUiVolOut').textContent = uiVolume(); $('#setVidVolOut').textContent = videoVolume(); };
-$('#setUiVol').oninput = e => { S.config.harbourUiVolume = Number(e.target.value); applyUiVolume(); showVolumes(); };
-$('#setUiVol').onchange = e => { saveSetting({ harbourUiVolume: Number(e.target.value) }); UISound.play('select'); };
-$('#setVidVol').oninput = e => { S.config.harbourVideoVolume = Number(e.target.value); $('#heroVideo').volume = videoVolume() / 100; showVolumes(); };
-$('#setVidVol').onchange = e => saveSetting({ harbourVideoVolume: Number(e.target.value) });
-$('#setSound').onchange = e => { saveSetting({ harbourVideoSound: e.target.value === '1' }); $('#heroVideo').muted = e.target.value !== '1'; };
+// One slider each for video sound and UI sounds: 0 is off (the volume underneath is kept for when it's back on).
+const uiSoundsOn = () => S.config.harbourUiSound !== false, videoSoundOn = () => !!S.config.harbourVideoSound;
+const showVolumes = () => {
+  const ui = uiSoundsOn() ? uiVolume() : 0, vid = videoSoundOn() ? videoVolume() : 0;
+  $('#setUiVol').value = ui; $('#setVidVol').value = vid;
+  $('#setUiVolOut').textContent = ui || 'Off'; $('#setVidVolOut').textContent = vid || 'Off';
+};
+function setUiSlider(v, save) {
+  S.config.harbourUiSound = v > 0; if (v > 0) S.config.harbourUiVolume = v;
+  UISound.configure({ enabled: v > 0 }); applyUiVolume(); showVolumes();
+  if (save) { saveSetting({ harbourUiSound: v > 0, ...(v > 0 ? { harbourUiVolume: v } : {}) }); UISound.play('select'); }
+}
+function setVideoSlider(v, save) {
+  S.config.harbourVideoSound = v > 0; if (v > 0) S.config.harbourVideoVolume = v;
+  const video = $('#heroVideo'); video.muted = !(v > 0); video.volume = videoVolume() / 100; showVolumes();
+  if (save) saveSetting({ harbourVideoSound: v > 0, ...(v > 0 ? { harbourVideoVolume: v } : {}) });
+}
+$('#setUiVol').oninput = e => setUiSlider(Number(e.target.value), false);
+$('#setUiVol').onchange = e => setUiSlider(Number(e.target.value), true);
+$('#setVidVol').oninput = e => setVideoSlider(Number(e.target.value), false);
+$('#setVidVol').onchange = e => setVideoSlider(Number(e.target.value), true);
 $('#setUnhide').onclick = async () => {
   for (const g of S.games.filter(x => x.hidden)) { await api.setHidden({ gameId: g.id, hidden: false }).catch(() => {}); g.hidden = false; }
   $('#settings').close(); buildTabs(); setTab(S.tab, true); toast('Hidden games are back.');

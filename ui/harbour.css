@@ -148,6 +148,7 @@ dialog::backdrop { background: rgba(3,7,14,.7); backdrop-filter: blur(8px); }
 dialog h2 { margin: 0 0 calc(18 * var(--u)); font-size: calc(30 * var(--u)); }
 .set-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: calc(12 * var(--u)) 0; border-bottom: 1px solid var(--line); }
 .set-row span { color: var(--muted); }
+#settings h3:first-of-type { margin-top: 0; }
 .set-row .set-btns { display: flex; gap: calc(10 * var(--u)); }
 select, input:not([type=checkbox]) { background: rgba(0,0,0,.35); border: 1px solid var(--line); border-radius: 8px; padding: calc(8 * var(--u)) calc(10 * var(--u)); }
 #rdForm { display: grid; gap: calc(12 * var(--u)); }
@@ -176,7 +177,7 @@ body.frozen *, body.frozen *::before, body.frozen *::after { animation-play-stat
 .dlg-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: calc(18 * var(--u)); }
 .dlg-head h2 { margin: 0; }
 .emu-console small.need { color: var(--beam); font-weight: 600; }  /* games here, but no emulator to play them */
-#emusDlg h3 { margin: calc(18 * var(--u)) 0 calc(10 * var(--u)); font-size: calc(17 * var(--u)); color: var(--muted); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+#emusDlg h3, #settings h3 { margin: calc(18 * var(--u)) 0 calc(10 * var(--u)); font-size: calc(17 * var(--u)); color: var(--muted); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
 .emu-consoles { display: grid; gap: calc(8 * var(--u)); }
 /* Same columns on every row, so the dropdowns line up whether or not a row has an Install button. */
 .emu-console { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) 11em; align-items: center; gap: 16px; }
