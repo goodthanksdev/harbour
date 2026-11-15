@@ -295,7 +295,8 @@ function showGame(g) {
   // It says how well the best of them runs, so "Experimental" tells you not to bother yet.
   const ports = portsFor(g), best = ports.map(x => x.status).sort((a, b) => (TIER[a] ?? 3) - (TIER[b] ?? 3))[0];
   $('#btnPort').hidden = !ports.length;
-  if (ports.length) $('#btnPort').textContent = `Install PC port · ${STATUS[best] || best}`;
+  // Small, in brackets, in the catalogue's colour for it (on a dark backing so it reads on the teal button).
+  if (ports.length) $('#btnPort').replaceChildren('Install PC port ', el('span', `port-tier tier ${best}`, `(${STATUS[best] || best})`));
   const up = $('#btnUpdate');
   up.hidden = !st?.updateAvailable; up.className = 'new';
   up.textContent = st?.updateAvailable ? (st.auto ? `⬆ Update to ${st.latest.tag}` : `${st.latest.tag}: update in app`) : '';
