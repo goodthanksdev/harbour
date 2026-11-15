@@ -55,7 +55,7 @@ Then, in Harbour:
 
 1. **Pick your games folder** (Harbour asks the first time; later: Settings → Emulators & game folders → Manage).
    Emulators for those consoles install by themselves; add ones you already have with ＋ → Emulator.
-2. **＋ → PC port / recomp**: paste its GitHub page and choose your game file (the ROM or disc it's made from).
+2. **＋ → PC port / recomp**: pick one from the catalogue (or paste its GitHub page) and choose your game file.
    Harbour downloads it, checks it, installs it into `Ports\` with your game file, and puts it on the right shelf.
    Already installed one? "Already installed…" picks its folder and Harbour works out the rest.
 3. Artwork and clips arrive by themselves.

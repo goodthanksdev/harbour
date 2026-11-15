@@ -47,3 +47,7 @@ Game details and artwork come from the [LaunchBox Games Database](https://gamesd
 [GameTDB](https://www.gametdb.com/) and [libretro thumbnails](https://thumbnails.libretro.com/), and are downloaded to
 your PC when you use Harbour. Harbour includes none of their data. Gameplay clips are cut from public YouTube videos
 for your own use on your own PC.
+
+The list of PC ports to choose from (＋ → PC port / recomp) is [Recompendium](https://recompendium.com/)'s catalogue,
+licensed [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/). Harbour downloads it while you use it and
+shows part of it (each game, project, console, status and what it needs) unchanged; it includes none of it.

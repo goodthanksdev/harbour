@@ -399,7 +399,7 @@ async function emulatorsFor(sysId) {
   return [...list.filter(e => fits(e) && (e.exe || e.custom)), ...list.filter(e => !fits(e) && e.exe)];
 }
 function showAddStep(step) {
-  for (const id of ['addPick', 'addGit', 'addPort', 'addEmuPick', 'addEmu']) $('#' + id).hidden = id !== step;
+  for (const id of ['addPick', 'addCatalog', 'addGit', 'addPort', 'addEmuPick', 'addEmu']) $('#' + id).hidden = id !== step;
   $('#' + step).querySelector('select, input, button')?.focus();
 }
 async function openAdd() {
@@ -407,7 +407,8 @@ async function openAdd() {
   $('#addPort').platform.replaceChildren(option('', 'No console (Recomp shelf)'), ...consoles().map(s => option(s.id, s.name)));
   $('#emuSystems').replaceChildren(...consoles().map(s => { const l = el('label', 'check'); const c = el('input'); c.type = 'checkbox'; c.value = s.id; l.append(c, s.name); return l; }));
   for (const f of [$('#addGit'), $('#addPort'), $('#addEmu')]) f.querySelectorAll('input[type=text], input:not([type])').forEach(i => { if (i.name !== 'args') i.value = ''; });
-  S.gitRom = null; $('#gitRomName').textContent = "The ROM or disc it's made from";
+  S.gitRom = null; S.gitPick = null; $('#gitRomName').textContent = "The ROM or disc it's made from";
+  $('#gitTitle').textContent = 'Add a PC port / recomp'; $('#gitNeeds').hidden = true; $('#catSearch').value = '';
   showAddStep('addPick');
   $('#addDlg').showModal();
 }
@@ -431,7 +432,46 @@ async function pickPort() {
   $('#addDlg').showModal();
 }
 $('#btnAdd').onclick = openAdd;
-for (const b of document.querySelectorAll('#addDlg .choice')) b.onclick = () => { UISound.play('select'); if (b.dataset.kind === 'port') showAddStep('addGit'); else showEmuCatalog(); };
+for (const b of document.querySelectorAll('#addDlg .choice')) b.onclick = () => { UISound.play('select'); if (b.dataset.kind === 'port') showPortCatalog(); else showEmuCatalog(); };
+// The catalogue: search, pick one, and the install form fills in (with what that port needs from you).
+async function showPortCatalog() {
+  showAddStep('addCatalog');
+  $('#portCatalog').replaceChildren(el('p', 'note', 'Loading the catalogue…'));
+  try { S.portList = await api.portCatalog(); } catch (e) { $('#portCatalog').replaceChildren(el('p', 'note', `Couldn't load the catalogue: ${e.message}`)); return; }
+  renderPortCatalog();
+  $('#catSearch').focus();
+}
+const STATUS = { fully: 'Fully playable', playable: 'Playable', experimental: 'Experimental' };
+function renderPortCatalog() {
+  const q = looseText($('#catSearch').value);
+  const owned = new Set(S.games.map(g => g.system));
+  // Games for consoles you play first, then the most popular; at most 60 shown (search narrows it down).
+  const list = (S.portList || []).filter(x => !q || looseText(`${x.name} ${x.project} ${x.repo} ${x.consoleName}`).includes(q))
+    .sort((a, b) => Number(owned.has(b.platform)) - Number(owned.has(a.platform)) || b.stars - a.stars).slice(0, 60);
+  $('#portCatalog').replaceChildren(...(list.length ? list.map(x => {
+    const card = el('div', 'emu-cat'), info = el('div', 'emu-cat-info');
+    // Console · which port it is (two ports of one game look alike otherwise) · how well it runs.
+    const sub = el('small', '', `${x.consoleName} · ${x.project !== x.name ? x.project : x.repo.split('/')[1]} · `);
+    sub.append(el('span', 'status', STATUS[x.status] || x.status));
+    info.append(el('b', '', x.name), sub);
+    const btn = el('button', x.installed ? '' : 'primary', x.installed ? 'Installed' : 'Choose'); btn.type = 'button'; btn.disabled = x.installed;
+    btn.onclick = () => pickFromCatalog(x);
+    card.append(info, btn); return card;
+  }) : [el('p', 'note', 'Nothing found. Paste its GitHub page instead.')]));
+}
+const looseText = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+$('#catSearch').oninput = () => renderPortCatalog();
+function pickFromCatalog(x) {
+  UISound.play('select');
+  S.gitPick = x; S.gitRom = null;
+  const f = $('#addGit'); f.repo.value = `https://github.com/${x.repo}`;
+  $('#gitTitle').textContent = x.name;
+  $('#gitNeeds').textContent = x.needs ? `Needs: ${x.needs}` : ''; $('#gitNeeds').hidden = !x.needs;
+  $('#gitRomName').textContent = "The ROM or disc it's made from";
+  showAddStep('addGit'); $('#gitRom').focus();
+}
+$('#catLink').onclick = () => { UISound.play('select'); S.gitPick = null; $('#gitTitle').textContent = 'Add a PC port / recomp'; $('#gitNeeds').hidden = true; showAddStep('addGit'); };
+$('#catFolder').onclick = () => { UISound.play('select'); pickPort(); };
 // PC port from its GitHub page: Harbour installs it (in the download queue) with your game file next to it.
 $('#gitRom').onclick = async () => {
   const file = await api.pickGameFile().catch(e => { toast(e.message); return null; });
@@ -443,12 +483,14 @@ $('#addGit').addEventListener('submit', e => {
   const repo = e.target.repo.value.trim();
   if (!repo) { UISound.play('error'); toast('Paste its GitHub page first.'); return; }
   $('#addDlg').close(); UISound.play('select');
-  installPort(repo, S.gitRom);
+  // Chosen from the catalogue (and the link left as it was): its name and console come with it.
+  const pick = S.gitPick && repo.toLowerCase().endsWith(S.gitPick.repo.toLowerCase()) ? S.gitPick : null;
+  installPort(repo, S.gitRom, pick);
 });
-function installPort(repo, rom) {
-  const name = repo.replace(/^https?:[/][/](www[.])?github[.]com[/]/i, '').split('/')[1] || repo;
-  return enqueue('port:' + name.toLowerCase(), `Installing ${name}`, async () => {
-    const entry = await api.installPort({ repo, rom });
+function installPort(repo, rom, pick = null) {
+  const name = pick?.name || repo.replace(/^https?:[/][/](www[.])?github[.]com[/]/i, '').split('/')[1] || repo;
+  return enqueue('port:' + repo.toLowerCase().split('/').slice(-2).join('/'), `Installing ${name}`, async () => {
+    const entry = await api.installPort({ repo, rom, title: pick?.name, platform: pick?.platform });
     await afterAdd(g => g.added === entry.id, entry.title);
     return { done: `${entry.title} installed` };
   });

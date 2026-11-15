@@ -111,11 +111,20 @@
       <p class="note">Games for emulators come from your game folders (Settings → Emulators &amp; game folders).</p>
       <div class="dlg-actions"><button type="button" class="addCancel">Cancel</button></div>
     </div>
+    <!-- Ports to choose from (Recompendium's catalogue) -->
+    <div id="addCatalog" hidden>
+      <h2>Add a PC port / recomp</h2>
+      <input id="catSearch" type="search" placeholder="Search games or ports" autocomplete="off" spellcheck="false" />
+      <div id="portCatalog" class="emu-catalog"></div>
+      <p class="note">Catalogue by <a href="https://recompendium.com/" target="_blank" rel="noopener">Recompendium</a> (CC BY-SA 4.0).</p>
+      <div class="dlg-actions"><button type="button" class="addBack">Back</button><button type="button" id="catLink">Paste a link…</button><button type="button" id="catFolder">Already installed…</button></div>
+    </div>
     <!-- A port from its GitHub page: Harbour installs it, with your game file -->
     <form id="addGit" hidden>
-      <h2>Add a PC port / recomp</h2>
+      <h2 id="gitTitle">Add a PC port / recomp</h2>
       <label>GitHub page<input name="repo" placeholder="github.com/owner/name" autocomplete="off" spellcheck="false" /></label>
       <label>Your game file</label>
+      <p id="gitNeeds" class="note" hidden></p>
       <div class="file-pick"><button type="button" id="gitRom">Choose…</button><span id="gitRomName" class="note">The ROM or disc it's made from</span></div>
       <div class="dlg-actions"><button type="button" class="addBack">Back</button><button type="button" id="gitFolder">Already installed…</button><button class="primary">Install</button></div>
     </form>

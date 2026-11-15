@@ -35,6 +35,7 @@ contextBridge.exposeInMainWorld('api', {
   gameRemove: id => call('game:remove', id),
   addPort: options => call('harbour:addPort', options),
   installPort: options => call('harbour:installPort', options),
+  portCatalog: () => call('harbour:portCatalog'),
   pickGameFile: () => call('harbour:pickGameFile'),
   // emulators
   emuList: () => call('emu:list'),

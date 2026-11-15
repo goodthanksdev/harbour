@@ -149,6 +149,9 @@ dialog h2 { margin: 0 0 calc(18 * var(--u)); font-size: calc(30 * var(--u)); }
 .set-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: calc(12 * var(--u)) 0; border-bottom: 1px solid var(--line); }
 .set-row span { color: var(--muted); }
 #settings h3:first-of-type { margin-top: 0; }
+dialog a { color: var(--accent); }
+#catSearch { width: 100%; margin-bottom: calc(12 * var(--u)); }
+.emu-cat .status { color: var(--accent); }
 .file-pick { display: flex; align-items: center; gap: calc(12 * var(--u)); margin-bottom: calc(14 * var(--u)); }
 .file-pick .note { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .set-row .set-btns { display: flex; gap: calc(10 * var(--u)); }

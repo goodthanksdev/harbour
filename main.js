@@ -808,6 +808,7 @@ async function findRelease(repo, { asset: pattern, prerelease }) {
       tag: rel.tag_name, releaseName: rel.name || rel.tag_name, publishedAt: asset.updated_at || rel.published_at,
       assetId: asset.id, assetName: asset.name, size: asset.size, url: asset.browser_download_url, notes: rel.body || '',
       digest: asset.digest || null, page: rel.html_url || `https://github.com/${repo}/releases`, api: asset.url || null,
+      uploader: asset.uploader?.login || rel.author?.login || null,
     };
   }
   const platformName = process.platform === 'win32' ? 'Windows' : process.platform === 'darwin' ? 'macOS' : 'Linux';
@@ -881,7 +882,7 @@ function noticeUpdate(holder, file, latest, outdated, current, name) {
   // Needs the exact release time: a day-only date would count a file from earlier that day as newer.
   const released = Date.parse(latest.published || latest.publishedAt || '') || Infinity;
   if ((inst.stamp && inst.stamp !== stamp.id) || stamp.mtime > released) {
-    holder.installed = { ...current(), stamp: stamp.id }; saveConfig(config);
+    holder.installed = { ...current(), uploader: inst.uploader, stamp: stamp.id }; saveConfig(config);
     log(`noticed ${name} was updated to ${latest.tag}`);
   } else if (!inst.stamp) { inst.stamp = stamp.id; saveConfig(config); }
 }
@@ -974,6 +975,14 @@ async function unpackRelease(rel, archive, tmp, send) {
   else await fsp.rename(archive, path.join(stage, rel.assetName));
   const top = fs.readdirSync(stage, { withFileTypes: true });
   return top.length === 1 && top[0].isDirectory() ? path.join(stage, top[0].name) : stage;
+}
+// ---- Same uploader ----
+// An update is only installed when the same account uploaded it as the version you have: a project taken over by
+// someone else, or a stranger's file, is stopped. (The first version Harbour installs sets who that is.) This and the
+// checksum work on any system; the Windows Defender scan is an extra where it's there.
+function checkUploader(installed, rel, name) {
+  if (installed?.uploader && rel.uploader && installed.uploader.toLowerCase() !== rel.uploader.toLowerCase())
+    throw new Error(`${name} ${rel.tag} was uploaded by a different account (${rel.uploader}, before: ${installed.uploader}). Harbour didn't install it: check its release page.`);
 }
 // ---- Can Harbour install this update, and where do its files go? ----
 // Harbour installs every update itself unless you switched that off, or it found that a project's downloads are
@@ -1082,6 +1091,7 @@ async function updateRecomp(gameId, sendRaw) {
     const hit = recompChecks.get(gameId);
     const rel = hit && hit.repo === entry.source.repo && Date.now() - hit.at < 10 * 60 * 1000 && hit.latest?.url ? hit.latest
       : await findRelease(entry.source.repo, { asset: entry.source.asset, prerelease: entry.source.prerelease });
+    checkUploader(entry.installed, rel, game.title);
     // A zip's file list says, before the big download, whether it holds the game's program at all.
     const exeName = entry.executable && path.basename(entry.executable).toLowerCase();
     if (exeName && /\.zip$/i.test(rel.assetName)) {
@@ -1099,7 +1109,7 @@ async function updateRecomp(gameId, sendRaw) {
       const exe = guessProgram(root, entry.source.repo);
       if (exe) entry.executable = exe;
     }
-    entry.installed = { tag: rel.tag, assetId: rel.assetId, date: rel.publishedAt, at: new Date().toISOString() };
+    entry.installed = { tag: rel.tag, assetId: rel.assetId, date: rel.publishedAt, at: new Date().toISOString(), uploader: rel.uploader || entry.installed?.uploader };
     saveConfig(config);
     recompChecks.set(gameId, { at: Date.now(), latest: rel, repo: entry.source.repo }); saveRecompChecks();
     send({ stage: 'Done', pct: 1, done: true });
@@ -1389,6 +1399,9 @@ function createWindow() {
   // A --fullscreen / --windowed launch is the same choice as pressing F11, so record it either way.
   if (config.fullscreen !== startFullscreen) { config.fullscreen = startFullscreen; saveConfig(config); }
   win.loadFile(path.join(ROOT, 'ui', 'index.html'));
+  // Web links (like the catalogue's credit) open in the normal browser, never inside Harbour.
+  win.webContents.setWindowOpenHandler(({ url }) => { if (/^https:[/][/]/.test(url)) shell.openExternal(url); return { action: 'deny' }; });
+  win.webContents.on('will-navigate', (e, url) => { if (!url.startsWith('file:')) { e.preventDefault(); if (/^https:[/][/]/.test(url)) shell.openExternal(url); } });
   win.webContents.once('did-finish-load', () => log('window loaded', { visible: win.isVisible(), bounds: win.getBounds() }));
   win.webContents.on('did-fail-load', (_e, code, desc) => log('window failed to load', code, desc));
   if (configWarning) win.webContents.once('did-finish-load', () => win.webContents.send('toast', configWarning));
@@ -1766,8 +1779,31 @@ handle('harbour:pickGameFile', async () => {
     filters: [{ name: 'Game files', extensions: [...GAME_FILE_EXTS, 'sfc', 'smc', 'rsdk', 'bin', 'img'] }, { name: 'All files', extensions: ['*'] }] });
   return r.canceled ? null : r.filePaths[0];
 });
+// The catalogue of ports to choose from: Recompendium's (https://recompendium.com/, CC BY-SA 4.0), read once a week.
+// Only what Harbour shows is kept: the game, the project, its GitHub page, its console and what it needs from you.
+const CATALOG_FILE = path.join(DATA, 'media', '_index', 'recompendium.json');
+const CATALOG_CONSOLES = { gamecube: 'gc', megadrive: 'genesis' };
+handle('harbour:portCatalog', async () => {
+  let cached = null;
+  try { cached = JSON.parse(await fsp.readFile(CATALOG_FILE, 'utf8')); } catch {}
+  if (!cached || Date.now() - cached.at > 7 * 864e5) {
+    try {
+      const r = await fetch('https://recompendium.com/unricopie/catalogo.json', { headers: { 'User-Agent': UA['User-Agent'] }, signal: AbortSignal.timeout(30000) });
+      if (!r.ok) throw new Error(`recompendium.com didn't answer (error ${r.status})`);
+      const list = ((await r.json()).entradas || [])
+        .filter(x => x.repo && /^[\w.-]+\/[\w.-]+$/.test(x.repo) && !x.retirado && !x.sin_enlace && x.version)
+        .map(x => ({ name: x.nombre, project: x.proyecto, repo: x.repo, console: CATALOG_CONSOLES[x.consola] || x.consola, consoleName: x.consola_nombre,
+          status: x.estado, needs: x.requisitos?.en || '', stars: x.estrellas || 0, year: x.anio || null }));
+      cached = { at: Date.now(), list };
+      await fsp.mkdir(path.dirname(CATALOG_FILE), { recursive: true });
+      await fsp.writeFile(CATALOG_FILE, JSON.stringify(cached));
+    } catch (e) { if (!cached) throw e; }  // offline: last week's list is fine
+  }
+  const have = new Set(config.extraGames.map(x => x.source?.repo?.toLowerCase()).filter(Boolean));
+  return cached.list.map(x => ({ ...x, platform: config.systems.some(s => s.id === x.console) ? x.console : '', installed: have.has(x.repo.toLowerCase()) }));
+});
 const installingPorts = new Set();
-handle('harbour:installPort', async ({ repo: link, rom }) => {
+handle('harbour:installPort', async ({ repo: link, rom, title, platform }) => {
   const repo = parseRepo(link);
   if (config.extraGames.some(x => x.source?.repo?.toLowerCase() === repo.toLowerCase())) throw new Error('That game is already in Harbour.');
   if (rom && !fs.existsSync(rom)) throw new Error("Can't find that game file.");
@@ -1794,8 +1830,10 @@ handle('harbour:installPort', async ({ repo: link, rom }) => {
     const exe = findGameExe(folder) || guessProgram(folder, repo);
     if (!exe) { await fsp.rm(folder, { recursive: true, force: true }); throw notReady(); }
     if (rom) await fsp.copyFile(rom, path.join(path.dirname(exe), path.basename(rom)));
-    const installed = { tag: rel.tag, assetId: rel.assetId, date: rel.publishedAt };
-    const found = await detectPort(folder, exe, { repo, installed, gameFile: rom });
+    const installed = { tag: rel.tag, assetId: rel.assetId, date: rel.publishedAt, uploader: rel.uploader || undefined };
+    // From the catalogue the name and console are known; otherwise Harbour works them out.
+    const found = title ? { title: String(title).slice(0, 120), platform: config.systems.some(s => s.id === platform) ? platform : '' }
+      : await detectPort(folder, exe, { repo, installed, gameFile: rom });
     const entry = { id: randomUUID().slice(0, 8), system: 'recomp', path: folder, title: found.title, executable: exe,
       platform: found.platform || undefined, source: { repo, prerelease: false }, installed };
     config.extraGames.push(entry); saveConfig(config);
@@ -1867,7 +1905,7 @@ handle('harbour:installEmulator', async catalogId => {
     config.customEmulators = config.customEmulators.filter(e => e.id !== id);
     config.customEmulators.push({ id, name: c.name, exe, args: c.args, systems: [...c.consoles],
       source: { ...c.source, prerelease: false },
-      installed: { tag: rel.tag, stamp: fileStamp(exe)?.id } });
+      installed: { tag: rel.tag, stamp: fileStamp(exe)?.id, uploader: rel.uploader || undefined } });
     // Consoles without a working emulator start using it.
     for (const s of config.systems) if (c.consoles.includes(s.id) && !emuDef(s.emulator)) s.emulator = id;
     saveConfig(config);
@@ -2035,7 +2073,7 @@ async function emulatorDownload(source, { installer = false } = {}) {
   for (const rel of (await r.json()).filter(x => !x.draft && (source.prerelease || !x.prerelease))) {
     const a = re ? rel.assets.find(x => re.test(x.name)) : guessAsset(rel.assets);
     if (a) return { tag: rel.tag_name, publishedAt: rel.published_at, assetId: a.id, assetName: a.name, size: a.size || 0,
-      url: a.browser_download_url, digest: null, page: rel.html_url || `https://${source.host}/${source.repo}/releases` };
+      url: a.browser_download_url, digest: null, page: rel.html_url || `https://${source.host}/${source.repo}/releases`, uploader: rel.author?.login || null };
   }
   throw new Error(`No Windows download found in the recent releases of ${source.repo}.`);
 }
@@ -2073,6 +2111,7 @@ handle('harbour:emuUpdate', async id => {
     const folder = path.dirname(exe);
     const viaInstaller = !canWrite(folder);
     const rel = await emulatorDownload(e.source, { installer: viaInstaller });
+    checkUploader(e.installed, rel, e.name);
     if (!viaInstaller && /\.zip$/i.test(rel.assetName)) {
       const names = await remoteZipNames(rel.url);
       if (names && !names.some(n => n.split('/').pop().toLowerCase() === path.basename(exe).toLowerCase())) throw updatesWithOwnTool(e.source, e.name);
@@ -2089,7 +2128,7 @@ handle('harbour:emuUpdate', async id => {
       ({ kept } = await installInto(root, src, e.installed?.tag, send));
     }
     if (!fs.existsSync(exe)) throw new Error(`${path.basename(exe)} is gone after the update. Choose the program again in Emulators.`);
-    e.installed = { tag: rel.tag, stamp: fileStamp(exe)?.id };
+    e.installed = { tag: rel.tag, stamp: fileStamp(exe)?.id, uploader: rel.uploader || e.installed?.uploader };
     saveConfig(config);
     const latest = { tag: rel.tag, date: (rel.publishedAt || '').slice(0, 10), published: rel.publishedAt, page: rel.page };
     recompChecks.set('emu:' + id, { at: Date.now(), latest, repo: JSON.stringify(e.source) }); saveRecompChecks();
