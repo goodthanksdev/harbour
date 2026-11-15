@@ -351,9 +351,9 @@ function openMenu(anchor) {
     add('🎲 Change video', () => downloadVideos('game', g.id, 'new'));
   } else if (videosOn()) add('Get a video for this game', () => downloadVideos('game', g.id, 'missing'));
   // A PC port you added can be taken out again (its files stay); a game from a games folder can be hidden.
-  if (g.recomp) add('Remove from Harbour', async () => {
-    if (!confirm(`Remove ${g.title} from Harbour? Its files stay where they are.`)) return;
-    try { await api.gameRemove(g.added); await reload(); toast(`${g.title} removed.`); } catch (e) { toast(e.message); }
+  if (g.recomp) add('Undock from Harbour', async () => {
+    if (!confirm(`Undock ${g.title} from Harbour? Its files stay where they are.`)) return;
+    try { await api.gameRemove(g.added); await reload(); toast(`${g.title} undocked.`); } catch (e) { toast(e.message); }
   });
   else add('Hide from Harbour', async () => { await api.setHidden({ gameId: g.id, hidden: true }); g.hidden = true; buildTabs(); setTab(S.tab); toast(`${g.title} hidden. Settings can show it again.`, 4000); });
   const r = anchor.getBoundingClientRect();
@@ -438,29 +438,36 @@ async function showPortCatalog() {
   showAddStep('addCatalog');
   $('#portCatalog').replaceChildren(el('p', 'note', 'Loading the catalogue…'));
   try { S.portList = await api.portCatalog(); } catch (e) { $('#portCatalog').replaceChildren(el('p', 'note', `Couldn't load the catalogue: ${e.message}`)); return; }
+  // Consoles to filter by, the busiest first.
+  const counts = {};
+  for (const x of S.portList) counts[x.consoleName] = (counts[x.consoleName] || 0) + 1;
+  $('#catConsole').replaceChildren(option('', `All consoles (${S.portList.length})`), ...Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([n, c]) => option(n, `${n} (${c})`)));
   renderPortCatalog();
   $('#catSearch').focus();
 }
 const STATUS = { fully: 'Fully playable', playable: 'Playable', experimental: 'Experimental' };
 function renderPortCatalog() {
-  const q = looseText($('#catSearch').value);
+  const q = looseText($('#catSearch').value), only = $('#catConsole').value;
   const owned = new Set(S.games.map(g => g.system));
-  // Games for consoles you play first, then the most popular; at most 60 shown (search narrows it down).
-  const list = (S.portList || []).filter(x => !q || looseText(`${x.name} ${x.project} ${x.repo} ${x.consoleName}`).includes(q))
-    .sort((a, b) => Number(owned.has(b.platform)) - Number(owned.has(a.platform)) || b.stars - a.stars).slice(0, 60);
+  // The whole catalogue. Games for consoles you play first, then ones with a download, then the most popular.
+  const list = (S.portList || []).filter(x => (!only || x.consoleName === only) && (!q || looseText(`${x.name} ${x.project} ${x.repo} ${x.consoleName}`).includes(q)))
+    .sort((a, b) => Number(owned.has(b.platform)) - Number(owned.has(a.platform)) || Number(b.released) - Number(a.released) || b.stars - a.stars);
   $('#portCatalog').replaceChildren(...(list.length ? list.map(x => {
     const card = el('div', 'emu-cat'), info = el('div', 'emu-cat-info');
-    // Console · which port it is (two ports of one game look alike otherwise) · how well it runs.
-    const sub = el('small', '', `${x.consoleName} · ${x.project !== x.name ? x.project : x.repo.split('/')[1]} · `);
-    sub.append(el('span', 'status', STATUS[x.status] || x.status));
-    info.append(el('b', '', x.name), sub);
-    const btn = el('button', x.installed ? '' : 'primary', x.installed ? 'Installed' : 'Choose'); btn.type = 'button'; btn.disabled = x.installed;
-    btn.onclick = () => pickFromCatalog(x);
-    card.append(info, btn); return card;
+    // Console · which port it is (two ports of one game look alike otherwise); how well it runs sits on the right.
+    // (a project named after the game, "Ocarina of Time (N64)", shows its own short name instead)
+    info.append(el('b', '', x.name), el('small', '', `${x.consoleName} · ${x.project.includes(x.name) ? x.repo.split('/')[1] : x.project}`));
+    const tier = el('span', `tier ${x.status}`, STATUS[x.status] || x.status);
+    // No release to download yet: its page instead (source code only, or still being made).
+    const btn = el('button', x.installed || !x.released ? '' : 'primary', x.installed ? 'Installed' : x.released ? 'Choose' : 'Page'); btn.type = 'button';
+    btn.disabled = x.installed; btn.title = x.released ? '' : 'No download yet: opens its GitHub page';
+    btn.onclick = () => x.released ? pickFromCatalog(x) : window.open(`https://github.com/${x.repo}`);
+    card.append(info, tier, btn); return card;
   }) : [el('p', 'note', 'Nothing found. Paste its GitHub page instead.')]));
 }
 const looseText = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 $('#catSearch').oninput = () => renderPortCatalog();
+$('#catConsole').onchange = () => renderPortCatalog();
 function pickFromCatalog(x) {
   UISound.play('select');
   S.gitPick = x; S.gitRom = null;

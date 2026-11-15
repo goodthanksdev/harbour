@@ -150,8 +150,14 @@ dialog h2 { margin: 0 0 calc(18 * var(--u)); font-size: calc(30 * var(--u)); }
 .set-row span { color: var(--muted); }
 #settings h3:first-of-type { margin-top: 0; }
 dialog a { color: var(--accent); }
-#catSearch { width: 100%; margin-bottom: calc(12 * var(--u)); }
-.emu-cat .status { color: var(--accent); }
+#catSearch { flex: 1; min-width: 0; }
+/* Port catalogue: how well each one runs, in a column of its own so it's easy to scan. */
+.emu-cat .tier { flex: none; width: calc(130 * var(--u)); text-align: right; font-size: .85em; font-weight: 600; margin-left: auto; }
+.tier.fully { color: var(--accent); }
+.tier.playable { color: #8fb8ff; }
+.tier.experimental { color: var(--beam); }
+.cat-filters { display: flex; gap: calc(10 * var(--u)); margin-bottom: calc(12 * var(--u)); }
+.cat-filters select { flex: none; max-width: calc(240 * var(--u)); }
 .file-pick { display: flex; align-items: center; gap: calc(12 * var(--u)); margin-bottom: calc(14 * var(--u)); }
 .file-pick .note { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .set-row .set-btns { display: flex; gap: calc(10 * var(--u)); }

@@ -1791,9 +1791,9 @@ handle('harbour:portCatalog', async () => {
       const r = await fetch('https://recompendium.com/unricopie/catalogo.json', { headers: { 'User-Agent': UA['User-Agent'] }, signal: AbortSignal.timeout(30000) });
       if (!r.ok) throw new Error(`recompendium.com didn't answer (error ${r.status})`);
       const list = ((await r.json()).entradas || [])
-        .filter(x => x.repo && /^[\w.-]+\/[\w.-]+$/.test(x.repo) && !x.retirado && !x.sin_enlace && x.version)
+        .filter(x => x.repo && /^[\w.-]+\/[\w.-]+$/.test(x.repo) && !x.retirado && !x.sin_enlace)
         .map(x => ({ name: x.nombre, project: x.proyecto, repo: x.repo, console: CATALOG_CONSOLES[x.consola] || x.consola, consoleName: x.consola_nombre,
-          status: x.estado, needs: x.requisitos?.en || '', stars: x.estrellas || 0, year: x.anio || null }));
+          status: x.estado, needs: x.requisitos?.en || '', stars: x.estrellas || 0, year: x.anio || null, released: !!x.version }));
       cached = { at: Date.now(), list };
       await fsp.mkdir(path.dirname(CATALOG_FILE), { recursive: true });
       await fsp.writeFile(CATALOG_FILE, JSON.stringify(cached));
