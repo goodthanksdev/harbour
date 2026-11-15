@@ -2,10 +2,8 @@
 
 ## PyroCade
 
-Harbour started from [PyroCade](https://github.com/Pyrodrifter/PyroCade) by Pyrodrifter. Its interface and most
-features have been rebuilt since, and `launchbox.js` and `artwork.js` were rewritten from scratch, but the library
-engine in `main.js` (configuration, library scanning and cache, launching games, the window) is based on PyroCade's
-code, used under the MIT License:
+Parts of `main.js` (configuration, library scanning, launching games, the window) are based on
+[PyroCade](https://github.com/Pyrodrifter/PyroCade) by Pyrodrifter, used under the MIT License:
 
 ```
 MIT License

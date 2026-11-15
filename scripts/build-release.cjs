@@ -62,7 +62,7 @@ execFileSync(await rcedit(), [path.join(out, 'Harbour.exe'),
   '--set-file-version', version, '--set-product-version', version,
   '--set-version-string', 'ProductName', 'Harbour', '--set-version-string', 'FileDescription', 'Harbour',
   '--set-version-string', 'CompanyName', 'Harbour', '--set-version-string', 'OriginalFilename', 'Harbour.exe',
-  '--set-version-string', 'InternalName', 'Harbour', '--set-version-string', 'LegalCopyright', 'MIT License'], { stdio: 'inherit' });
+  '--set-version-string', 'InternalName', 'Harbour', '--set-version-string', 'LegalCopyright', 'MIT-0'], { stdio: 'inherit' });
 
 // Zip it with the bsdtar built into Windows, and write its checksum.
 execFileSync(path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe'), ['-a', '-c', '-f', zip, '-C', dist, name], { stdio: 'inherit' });
