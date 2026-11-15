@@ -19,3 +19,6 @@ dist/
 
 # Emulators Harbour installed (when run from source)
 Emulators/
+
+# PC ports Harbour installed (when run from source)
+Ports/

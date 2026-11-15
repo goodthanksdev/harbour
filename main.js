@@ -1676,16 +1676,17 @@ function consoleClues(folder) {
 // Folder names that say nothing about the game: look one folder up as well.
 const GENERIC_FOLDER = /^(launcher|bin|game|port|app|x64|win64|windows|build|release|dist|portable|files)$/i;
 
-async function detectPort(folder, exe) {
+async function detectPort(folder, exe, known = null) {
   // 1. Which GitHub project: ones the game's files link to, then a search on its folder and program names.
+  // (Installed from its GitHub page: the project and version are known already.)
   const folders = [path.basename(folder)];
   if (GENERIC_FOLDER.test(folders[0])) folders.push(path.basename(path.dirname(folder)));
-  const candidates = linkedRepos(GENERIC_FOLDER.test(folders[0]) ? path.dirname(folder) : folder);
+  const candidates = known ? [] : linkedRepos(GENERIC_FOLDER.test(folders[0]) ? path.dirname(folder) : folder);
   const linked = new Set(candidates);
   // A name without the port jargon ("sly2-windows-x64" -> "sly2").
   const plain = s => splitName(String(s || '').replace(/[-_.]+/g, ' ').replace(PORT_JARGON, ' ')).replace(PORT_JARGON, ' ').replace(/\s+/g, ' ').trim();
   const names = [...new Set([...folders, path.basename(exe)].flatMap(n => [plain(n), splitName(n)]))].filter(n => n.length > 2 && !GENERIC_FOLDER.test(n));
-  for (const n of names.slice(0, 3)) {  // GitHub allows only a few searches a minute
+  for (const n of known ? [] : names.slice(0, 3)) {  // GitHub allows only a few searches a minute
     try {
       const found = await ghJson(`https://api.github.com/search/repositories?q=${encodeURIComponent(n)}&sort=stars&per_page=5`);
       for (const r of found.items || []) candidates.push(r.full_name);
@@ -1694,8 +1695,8 @@ async function detectPort(folder, exe) {
   // The first project whose release has exactly your program wins. One that only holds a program of that name
   // counts just when the game's own files link to it: from a search alone it could be a fork (blank beats wrong).
   // (linked: the projects the game's own files mention, captured before the search results were added)
-  let match = null;
-  for (const repo of [...new Set(candidates)].slice(0, 8)) {
+  let match = known ? { repo: known.repo, installed: known.installed, prerelease: false, exact: true } : null;
+  for (const repo of known ? [] : [...new Set(candidates)].slice(0, 8)) {
     const m = await matchReleases(repo, exe);
     if (!m) continue;
     if (m.exact) { match = m; break; }
@@ -1716,7 +1717,8 @@ async function detectPort(folder, exe) {
   }
   // The project's own name ("Ghostship") isn't the game's name, even if the games database lists it.
   const ownName = match ? looseKey(plain(match.repo.split('/')[1])) : '';
-  const guess = await nameAndConsole([description, readmeTitle, match && plain(match.repo.split('/')[1]), ...folders.map(plain), plain(path.basename(exe)), readmeBody], ownName, consoleClues(GENERIC_FOLDER.test(folders[0]) ? path.dirname(folder) : folder));
+  // Your own game file's name ("Mario Kart 64 (USA).z64") says best which game it is, so it's asked first.
+  const guess = await nameAndConsole([known?.gameFile ? cleanTitle(path.basename(known.gameFile, path.extname(known.gameFile))) : '', description, readmeTitle, match && plain(match.repo.split('/')[1]), ...folders.map(plain), plain(path.basename(exe)), readmeBody], ownName, consoleClues(GENERIC_FOLDER.test(folders[0]) ? path.dirname(folder) : folder));
   return {
     title: (guess.title || plain(folders.at(-1)) || titleFromFolder(path.basename(folder))).slice(0, 120),
     platform: guess.platform && config.systems.some(s => s.id === guess.platform) ? guess.platform : '',
@@ -1752,6 +1754,58 @@ handle('harbour:addPort', async ({ folder, executable, platform, title, repo, pr
     executable, platform: platform || undefined, source, installed: source && installed?.tag ? installed : undefined };
   config.extraGames.push(entry); saveConfig(config);
   return { ...entry, exeName: path.basename(executable) };
+});
+// ---- Installing a PC port from its GitHub page, with your game file ----
+// Harbour downloads the newest Windows release (checked like any update), unpacks it into Ports\<name> beside its
+// data, puts your ROM or disc next to the program (where these ports look for it on their first start), works out
+// the name and console and adds it. Projects without a ready-to-run Windows build are refused up front.
+const PORTS_DIR = path.join(path.dirname(DATA), 'Ports');
+const GAME_FILE_EXTS = [...new Set(DEFAULT_SYSTEMS.filter(s => !s.direct).flatMap(s => s.extensions).map(e => e.slice(1)))];
+handle('harbour:pickGameFile', async () => {
+  const r = await dialog.showOpenDialog(win, { title: 'Choose your game file (the ROM or disc the port is made from)', properties: ['openFile'],
+    filters: [{ name: 'Game files', extensions: [...GAME_FILE_EXTS, 'sfc', 'smc', 'rsdk', 'bin', 'img'] }, { name: 'All files', extensions: ['*'] }] });
+  return r.canceled ? null : r.filePaths[0];
+});
+const installingPorts = new Set();
+handle('harbour:installPort', async ({ repo: link, rom }) => {
+  const repo = parseRepo(link);
+  if (config.extraGames.some(x => x.source?.repo?.toLowerCase() === repo.toLowerCase())) throw new Error('That game is already in Harbour.');
+  if (rom && !fs.existsSync(rom)) throw new Error("Can't find that game file.");
+  if (installingPorts.has(repo)) throw new Error('Already installing.');
+  installingPorts.add(repo);
+  const send = p => win?.webContents.send('recomp:progress', { gameId: 'port:' + repo, ...p });
+  const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'harbour-port-'));
+  try {
+    send({ stage: 'Finding the latest release…', pct: 0 });
+    let rel;
+    try { rel = await findRelease(repo, { prerelease: false }); }
+    catch (e) { throw new Error(e.status === 404 ? "GitHub can't find that project." : `${repo} has no Windows download Harbour can install. Install it the way its page says, then add its folder.`); }
+    const notReady = () => new Error(`${repo} doesn't publish a ready-to-run Windows build. Install it the way its page says, then add its folder.`);
+    if (/setup|install/i.test(rel.assetName) && /\.(exe|msi)$/i.test(rel.assetName)) throw notReady();
+    if (/\.zip$/i.test(rel.assetName)) { const names = await remoteZipNames(rel.url); if (names && !names.some(n => /\.exe$/i.test(n))) throw notReady(); }
+    const { archive, scan } = await fetchRelease(rel, tmp, send);
+    const src = await unpackRelease(rel, archive, tmp, send);
+    send({ stage: 'Installing…', pct: 1 });
+    // Its own folder, named after the project ("SpaghettiKart"), never on top of another one.
+    let folder = path.join(PORTS_DIR, repo.split('/')[1].replace(/[<>:"|?*]/g, ''));
+    for (let n = 2; fs.existsSync(folder); n++) folder = path.join(PORTS_DIR, `${repo.split('/')[1]} ${n}`);
+    await fsp.mkdir(folder, { recursive: true });
+    await fsp.cp(src, folder, { recursive: true });
+    const exe = findGameExe(folder) || guessProgram(folder, repo);
+    if (!exe) { await fsp.rm(folder, { recursive: true, force: true }); throw notReady(); }
+    if (rom) await fsp.copyFile(rom, path.join(path.dirname(exe), path.basename(rom)));
+    const installed = { tag: rel.tag, assetId: rel.assetId, date: rel.publishedAt };
+    const found = await detectPort(folder, exe, { repo, installed, gameFile: rom });
+    const entry = { id: randomUUID().slice(0, 8), system: 'recomp', path: folder, title: found.title, executable: exe,
+      platform: found.platform || undefined, source: { repo, prerelease: false }, installed };
+    config.extraGames.push(entry); saveConfig(config);
+    log(`installed port ${repo} ${rel.tag} (${rel.assetName}, defender: ${scan}) to ${folder} as ${found.title} [${found.platform || 'recomp'}]${rom ? ' with ' + path.basename(rom) : ''}`);
+    send({ stage: 'Done', pct: 1, done: true });
+    return entry;
+  } finally {
+    installingPorts.delete(repo);
+    fsp.rm(tmp, { recursive: true, force: true }).catch(() => {});
+  }
 });
 // An emulator you already have: pick its .exe, say which consoles it plays, and optionally make it
 // the one those consoles use. "{rom}" in the arguments is replaced with the game's file.

@@ -53,7 +53,7 @@
     <p class="note">Point Harbour at your games folder: it finds the console folders inside (N64, PS2, Switch…) and their games, then gets artwork and gameplay clips by itself.</p>
     <div class="choices">
       <button type="button" class="choice" id="welcomeFolder"><b>Pick your games folder</b><span>Games for emulators, sorted by console.</span></button>
-      <button type="button" class="choice" id="welcomePort"><b>Add a PC port / recomp</b><span>Pick its folder. Harbour works out the rest.</span></button>
+      <button type="button" class="choice" id="welcomePort"><b>Add a PC port / recomp</b><span>Its GitHub page and your game file. Harbour does the rest.</span></button>
     </div>
     <div class="dlg-actions"><button type="button" id="welcomeLater">Later</button></div>
   </dialog>
@@ -105,12 +105,20 @@
     <div id="addPick">
       <h2>Add to Harbour</h2>
       <div class="choices">
-        <button type="button" class="choice" data-kind="port"><b>PC port / recomp</b><span>Pick its folder. Harbour works out the rest.</span></button>
+        <button type="button" class="choice" data-kind="port"><b>PC port / recomp</b><span>Its GitHub page and your game file. Harbour does the rest.</span></button>
         <button type="button" class="choice" data-kind="emu"><b>Emulator</b><span>Install a well-known one in a click, or add one you have.</span></button>
       </div>
       <p class="note">Games for emulators come from your game folders (Settings → Emulators &amp; game folders).</p>
       <div class="dlg-actions"><button type="button" class="addCancel">Cancel</button></div>
     </div>
+    <!-- A port from its GitHub page: Harbour installs it, with your game file -->
+    <form id="addGit" hidden>
+      <h2>Add a PC port / recomp</h2>
+      <label>GitHub page<input name="repo" placeholder="github.com/owner/name" autocomplete="off" spellcheck="false" /></label>
+      <label>Your game file</label>
+      <div class="file-pick"><button type="button" id="gitRom">Choose…</button><span id="gitRomName" class="note">The ROM or disc it's made from</span></div>
+      <div class="dlg-actions"><button type="button" class="addBack">Back</button><button type="button" id="gitFolder">Already installed…</button><button class="primary">Install</button></div>
+    </form>
     <!-- Filled in by Harbour after you pick the folder; change anything it got wrong -->
     <form id="addPort" hidden>
       <h2>Add a PC port / recomp</h2>

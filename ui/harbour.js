@@ -399,14 +399,15 @@ async function emulatorsFor(sysId) {
   return [...list.filter(e => fits(e) && (e.exe || e.custom)), ...list.filter(e => !fits(e) && e.exe)];
 }
 function showAddStep(step) {
-  for (const id of ['addPick', 'addPort', 'addEmuPick', 'addEmu']) $('#' + id).hidden = id !== step;
+  for (const id of ['addPick', 'addGit', 'addPort', 'addEmuPick', 'addEmu']) $('#' + id).hidden = id !== step;
   $('#' + step).querySelector('select, input, button')?.focus();
 }
 async function openAdd() {
   UISound.play('open');
   $('#addPort').platform.replaceChildren(option('', 'No console (Recomp shelf)'), ...consoles().map(s => option(s.id, s.name)));
   $('#emuSystems').replaceChildren(...consoles().map(s => { const l = el('label', 'check'); const c = el('input'); c.type = 'checkbox'; c.value = s.id; l.append(c, s.name); return l; }));
-  for (const f of [$('#addPort'), $('#addEmu')]) f.querySelectorAll('input[type=text], input:not([type])').forEach(i => { if (i.name !== 'args') i.value = ''; });
+  for (const f of [$('#addGit'), $('#addPort'), $('#addEmu')]) f.querySelectorAll('input[type=text], input:not([type])').forEach(i => { if (i.name !== 'args') i.value = ''; });
+  S.gitRom = null; $('#gitRomName').textContent = "The ROM or disc it's made from";
   showAddStep('addPick');
   $('#addDlg').showModal();
 }
@@ -430,7 +431,28 @@ async function pickPort() {
   $('#addDlg').showModal();
 }
 $('#btnAdd').onclick = openAdd;
-for (const b of document.querySelectorAll('#addDlg .choice')) b.onclick = () => { UISound.play('select'); if (b.dataset.kind === 'port') pickPort(); else showEmuCatalog(); };
+for (const b of document.querySelectorAll('#addDlg .choice')) b.onclick = () => { UISound.play('select'); if (b.dataset.kind === 'port') showAddStep('addGit'); else showEmuCatalog(); };
+// PC port from its GitHub page: Harbour installs it (in the download queue) with your game file next to it.
+$('#gitRom').onclick = async () => {
+  const file = await api.pickGameFile().catch(e => { toast(e.message); return null; });
+  if (file) { S.gitRom = file; $('#gitRomName').textContent = file.split(/[\\/]/).pop(); }
+};
+$('#gitFolder').onclick = () => { UISound.play('select'); pickPort(); };
+$('#addGit').addEventListener('submit', e => {
+  e.preventDefault();
+  const repo = e.target.repo.value.trim();
+  if (!repo) { UISound.play('error'); toast('Paste its GitHub page first.'); return; }
+  $('#addDlg').close(); UISound.play('select');
+  installPort(repo, S.gitRom);
+});
+function installPort(repo, rom) {
+  const name = repo.replace(/^https?:[/][/](www[.])?github[.]com[/]/i, '').split('/')[1] || repo;
+  return enqueue('port:' + name.toLowerCase(), `Installing ${name}`, async () => {
+    const entry = await api.installPort({ repo, rom });
+    await afterAdd(g => g.added === entry.id, entry.title);
+    return { done: `${entry.title} installed` };
+  });
+}
 for (const b of document.querySelectorAll('#addDlg .addBack')) b.onclick = () => { UISound.play('back'); showAddStep('addPick'); };
 for (const b of document.querySelectorAll('#addDlg .addCancel')) b.onclick = () => { UISound.play('back'); $('#addDlg').close(); };
 // After adding: show it, then fetch its artwork and a gameplay clip without being asked.
@@ -994,7 +1016,7 @@ init().catch(e => toast('Harbour failed to start: ' + e.message, 10000));
 
 // ---------- first start ----------
 $('#welcomeFolder').onclick = async () => { UISound.play('select'); $('#welcomeDlg').close(); await addGameFolder(''); };
-$('#welcomePort').onclick = async () => { UISound.play('select'); $('#welcomeDlg').close(); await pickPort(); };
+$('#welcomePort').onclick = async () => { UISound.play('select'); $('#welcomeDlg').close(); await openAdd(); showAddStep('addGit'); };
 $('#welcomeLater').onclick = () => { UISound.play('back'); $('#welcomeDlg').close(); };
 
 // ---------- installing well-known emulators ----------
