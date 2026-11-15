@@ -784,7 +784,7 @@ async function findRelease(repo, { asset: pattern, prerelease }) {
     if (asset) return {
       tag: rel.tag_name, releaseName: rel.name || rel.tag_name, publishedAt: asset.updated_at || rel.published_at,
       assetId: asset.id, assetName: asset.name, size: asset.size, url: asset.browser_download_url, notes: rel.body || '',
-      digest: asset.digest || null, page: rel.html_url || `https://github.com/${repo}/releases`,
+      digest: asset.digest || null, page: rel.html_url || `https://github.com/${repo}/releases`, api: asset.url || null,
     };
   }
   const platformName = process.platform === 'win32' ? 'Windows' : process.platform === 'darwin' ? 'macOS' : 'Linux';
@@ -924,7 +924,11 @@ async function copyUpdate(src, dest, backup, kept) {
 // back the folder of new files ready to copy. The caller removes tmp afterwards.
 async function fetchRelease(rel, tmp, send) {
   const archive = path.join(tmp, rel.assetName);
-  const r = await fetch(rel.url, { headers: { 'User-Agent': UA['User-Agent'] } });
+  let r = await fetch(rel.url, { headers: { 'User-Agent': UA['User-Agent'] } });
+  // A private GitHub repository's downloads need the GitHub login (gh) on this PC, through GitHub's own address.
+  // The login is sent only to api.github.com: the redirect to the file itself drops it.
+  if (r.status === 404 && /^https:[/][/]api[.]github[.]com[/]/.test(rel.api || '') && githubToken())
+    r = await fetch(rel.api, { headers: { 'User-Agent': UA['User-Agent'], Accept: 'application/octet-stream', Authorization: `Bearer ${githubToken()}` } });
   if (!r.ok) throw new Error(`The download failed (error ${r.status}). Try again later.`);
   const total = Number(r.headers.get('content-length')) || rel.size || 0;
   let got = 0, last = 0;

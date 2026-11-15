@@ -94,11 +94,18 @@ function emuInfo(g) {
   const sys = S.config.systems.find(s => s.id === g.system);
   if (!sys || sys.direct) return null;
   const emu = (S.emus || []).find(e => e.id === sys.emulator);
-  if (!emu) return { state: 'missing', text: 'No emulator yet: Play installs one' };
+  if (!emu) return { state: 'missing', text: 'No emulator yet' };
   if (!emu.exe) return { state: 'missing', text: `${emu.name} not found (Settings → Emulators)` };
   const st = S.emuStatus?.[emu.id];
   if (st?.updateAvailable) return { state: 'update', text: `${emu.name}: ${st.latest.tag} available` };
   return { state: 'ok', text: `via ${emu.name}` };
+}
+// A game whose console has no emulator set: the well-known one Harbour can install for it (else null).
+function emuOffer(g) {
+  if (!g || g.recomp) return null;
+  const sys = S.config.systems.find(s => s.id === g.system);
+  if (!sys || sys.direct || (S.emus || []).some(e => e.id === sys.emulator)) return null;
+  return (S.catalog || []).find(c => c.consoles.includes(g.system)) || null;
 }
 function emuBadge(info, cls, text) {
   const b = el('span', `${cls} ${info.state}`); b.title = info.text;
@@ -109,6 +116,7 @@ function emuBadge(info, cls, text) {
 }
 async function loadEmulators(force = false) {
   S.emus = await api.emuList().catch(() => []);
+  S.catalog = await api.emulatorCatalog().catch(() => S.catalog || []);
   S.emuStatus = await api.checkEmulators(force).catch(() => S.emuStatus || {});
 }
 
@@ -283,6 +291,9 @@ function showGame(g) {
   const emu = emuInfo(g);
   if (emu) meta.append(emuBadge(emu, 'emu-chip', emu.text));
   $('#gDesc').textContent = g.info?.description || '';
+  // No emulator for this console yet: the Play button installs one instead.
+  const offer = emuOffer(g), playBtn = $('#btnPlay');
+  if (!S.installingFor) playBtn.replaceChildren(...(offer ? [`Install ${offer.name}`] : [el('span', 'tri'), 'Play']));
   const up = $('#btnUpdate');
   up.hidden = !st?.updateAvailable; up.className = 'new';
   up.textContent = st?.updateAvailable ? (st.auto ? `⬆ Update to ${st.latest.tag}` : `${st.latest.tag}: update in app`) : '';
@@ -296,8 +307,13 @@ function playTime(g) {
 // ---------- actions ----------
 async function play(g = S.list[S.sel]) {
   if (!g || S.running) return;
-  // No emulator for this console yet: install the well-known one first, then start the game.
-  if (emuInfo(g)?.state === 'missing' && !(await installFor([g.system]))) return;
+  // No emulator for this console yet: the button says Install, and installs it.
+  if (emuOffer(g)) {
+    const btn = $('#btnPlay');
+    S.installingFor = true; btn.disabled = true; btn.replaceChildren('Installing…');
+    try { await installFor([g.system]); } finally { S.installingFor = false; btn.disabled = false; showGame(S.list[S.sel]); }
+    return;
+  }
   UISound.play('launch');
   try { await api.launch(g.id); toast(`Starting ${g.title}…`, 2500); }
   catch (e) { UISound.play('error'); toast(e.message, 6000); }
@@ -660,6 +676,8 @@ $('#setCheck').onclick = () => { $('#settings').close(); checkUpdates(true); };
 $('#setArt').onclick = () => { $('#settings').close(); downloadArt('library'); };
 $('#setVideos').onclick = () => { $('#settings').close(); downloadVideos('library'); };
 async function downloadVideos(scope, gameId, mode = 'missing') {
+  // Artwork first: new clips wait until the covers and backgrounds are in.
+  if (S.artBusy && mode === 'missing') { const before = S.afterArt; S.afterArt = () => { before?.(); downloadVideos(scope, gameId, mode); }; return; }
   // Let go of the clip first: Windows won't replace a video file that's still playing.
   if (mode !== 'missing') { S.videoJob = scope === 'game' ? gameId : 'library'; stopVideo(); }
   try {
