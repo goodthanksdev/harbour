@@ -291,6 +291,8 @@ function showGame(g) {
   const offer = emuOffer(g), playBtn = $('#btnPlay');
   if (!S.installingFor) playBtn.replaceChildren(...(offer ? [`Install ${offer.name}`] : [el('span', 'tri'), 'Play']));
   const hint = $('#hints span'); if (hint?.lastChild) hint.lastChild.textContent = offer ? 'Install' : 'Play';
+  // A PC port of this game exists (the catalogue, same game and console): say so, next to Play. Otherwise nothing.
+  $('#btnPort').hidden = !portsFor(g).length;
   const up = $('#btnUpdate');
   up.hidden = !st?.updateAvailable; up.className = 'new';
   up.textContent = st?.updateAvailable ? (st.auto ? `⬆ Update to ${st.latest.tag}` : `${st.latest.tag}: update in app`) : '';
@@ -341,6 +343,7 @@ function openMenu(anchor) {
     if (S.recomp[g.id]?.repo) add('Open release page', () => api.recompOpenPage(g.id).catch(e => toast(e.message)));
     add('Choose game .exe…', () => api.chooseGameExecutable(g.id).then(r => r && toast('Saved.')).catch(e => toast(e.message)));
   }
+  if (!g.recomp) add('Install PC port…', () => portsForGame(g));
   add('Rename…', () => openRename(g));
   add('Open game folder', () => api.openGameFolder(g.id).catch(e => toast(e.message)));
   // 🎲: cover art = the next of the database's backgrounds (the big picture behind the game; the box cover stays);
@@ -408,7 +411,7 @@ async function openAdd() {
   $('#addPort').platform.replaceChildren(option('', 'No console (Recomp shelf)'), ...consoles().map(s => option(s.id, s.name)));
   $('#emuSystems').replaceChildren(...consoles().map(s => { const l = el('label', 'check'); const c = el('input'); c.type = 'checkbox'; c.value = s.id; l.append(c, s.name); return l; }));
   for (const f of [$('#addGit'), $('#addPort'), $('#addEmu')]) f.querySelectorAll('input[type=text], input:not([type])').forEach(i => { if (i.name !== 'args') i.value = ''; });
-  S.gitRom = null; S.gitPick = null; $('#gitRomName').textContent = "The ROM or disc it's made from";
+  S.gitRom = null; S.gitPick = null; S.portGame = null; $('#gitRomName').textContent = "The ROM or disc it's made from";
   $('#gitTitle').textContent = 'Add a PC port / recomp'; $('#gitNeeds').hidden = true; $('#catSearch').value = '';
   showAddStep('addPick');
   $('#addDlg').showModal();
@@ -435,7 +438,23 @@ async function pickPort() {
 $('#btnAdd').onclick = openAdd;
 for (const b of document.querySelectorAll('#addDlg .choice')) b.onclick = () => { UISound.play('select'); if (b.dataset.kind === 'port') showPortCatalog(); else showEmuCatalog(); };
 // The catalogue: search, pick one, and the install form fills in (with what that port needs from you).
-async function showPortCatalog() {
+// Ports of an emulator game in the catalogue: the same console, and the same name once punctuation, "the" and
+// "and"/"&" are set aside ("Legend of Zelda, The - Ocarina of Time" = "The Legend of Zelda: Ocarina of Time").
+const nameKey = s => looseText(String(s || '').replace(/&/g, ' and ')).replace(/\b(the|and)\b/g, '').replace(/ /g, '');
+function portsFor(g) {
+  if (!g || g.recomp || !S.portList) return [];
+  const key = nameKey(g.title);
+  return S.portList.filter(x => x.released && !x.installed && x.platform === g.system && nameKey(x.name) === key);
+}
+// "Install PC port": the catalogue searched to this game on its console, with your copy of it ready as the game file.
+async function portsForGame(g) {
+  S.portGame = g;
+  await openAdd();
+  S.portGame = g;  // (openAdd clears what was picked before)
+  showPortCatalog({ q: g.title, console: g.system });
+}
+$('#btnPort').onclick = () => { const g = S.list[S.sel]; if (g) { UISound.play('select'); portsForGame(g); } };
+async function showPortCatalog(prefill = null) {
   showAddStep('addCatalog');
   $('#portCatalog').replaceChildren(el('p', 'note', 'Loading the catalogue…'));
   try { S.portList = await api.portCatalog(); } catch (e) { $('#portCatalog').replaceChildren(el('p', 'note', `Couldn't load the catalogue: ${e.message}`)); return; }
@@ -443,16 +462,24 @@ async function showPortCatalog() {
   const counts = {};
   for (const x of S.portList) counts[x.consoleName] = (counts[x.consoleName] || 0) + 1;
   $('#catConsole').replaceChildren(option('', `All consoles (${S.portList.length})`), ...Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([n, c]) => option(n, `${n} (${c})`)));
+  if (prefill) {
+    $('#catSearch').value = prefill.q;
+    const name = S.portList.find(x => x.platform === prefill.console)?.consoleName;
+    if (name) $('#catConsole').value = name;
+  }
   renderPortCatalog();
-  $('#catSearch').focus();
+  (prefill ? $('#portCatalog button:not([disabled])') : $('#catSearch'))?.focus();
 }
 const STATUS = { fully: 'Fully playable', playable: 'Playable', experimental: 'Experimental' };
+const TIER = { fully: 0, playable: 1, experimental: 2 };
 function renderPortCatalog() {
   const q = looseText($('#catSearch').value), only = $('#catConsole').value;
   const owned = new Set(S.games.map(g => g.system));
   // The whole catalogue. Games for consoles you play first, then ones with a download, then the most popular.
-  const list = (S.portList || []).filter(x => (!only || x.consoleName === only) && (!q || looseText(`${x.name} ${x.project} ${x.repo} ${x.consoleName}`).includes(q)))
-    .sort((a, b) => Number(owned.has(b.platform)) - Number(owned.has(a.platform)) || Number(b.released) - Number(a.released) || b.stars - a.stars);
+  // Every word of the search must appear ("ratchet clank" finds "Ratchet & Clank").
+  const words = q.split(' ').filter(w => w && w !== 'and' && w !== 'the');
+  const list = (S.portList || []).filter(x => (!only || x.consoleName === only) && (!words.length || (t => words.every(w => t.includes(w)))(looseText(`${x.name} ${x.project} ${x.repo} ${x.consoleName}`))))
+    .sort((a, b) => Number(owned.has(b.platform)) - Number(owned.has(a.platform)) || Number(b.released) - Number(a.released) || (TIER[a.status] ?? 3) - (TIER[b.status] ?? 3) || b.stars - a.stars);
   $('#portCatalog').replaceChildren(...(list.length ? list.map(x => {
     const card = el('div', 'emu-cat'), info = el('div', 'emu-cat-info');
     // Console · which port it is (two ports of one game look alike otherwise); how well it runs sits on the right.
@@ -476,7 +503,10 @@ function pickFromCatalog(x) {
   $('#gitTitle').textContent = x.name;
   $('#gitNeeds').textContent = x.needs ? `Needs: ${x.needs}` : ''; $('#gitNeeds').hidden = !x.needs;
   $('#gitRomName').textContent = "The ROM or disc it's made from";
-  showAddStep('addGit'); $('#gitRom').focus();
+  // Came from a game on your shelf: your copy of it is the game file.
+  const own = S.portGame && S.portGame.system === x.platform ? S.portGame.romPath : null;
+  if (own) { S.gitRom = own; $('#gitRomName').textContent = own.split(/[\\/]/).pop(); }
+  showAddStep('addGit'); (own ? $('#addGit button.primary') : $('#gitRom')).focus();
 }
 $('#catLink').onclick = () => { UISound.play('select'); S.gitPick = null; $('#gitTitle').textContent = 'Add a PC port / recomp'; $('#gitNeeds').hidden = true; showAddStep('addGit'); };
 $('#catFolder').onclick = () => { UISound.play('select'); pickPort(); };
@@ -1045,6 +1075,7 @@ async function init() {
   api.scan(false, { onlyIfChanged: true }).then(fresh => { if (fresh) { const id = S.list[S.sel]?.id; S.games = fresh; buildTabs(); setTab(S.tab, true); const i = S.list.findIndex(g => g.id === id); if (i >= 0) select(i, true); } })
     .catch(() => {}).then(autoMedia);
   checkUpdates(false);
+  api.portCatalog().then(list => { S.portList = list; showGame(S.list[S.sel]); }).catch(() => {});
   // Nothing to show yet: say hello and offer the two ways in.
   if (!S.games.length) { UISound.play('open'); $('#welcomeDlg').showModal(); }
   // Emulator badges: draw them once the emulators' update checks are in.
