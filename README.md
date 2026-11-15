@@ -2,50 +2,59 @@
 
 ![Harbour](ui/assets/brand/harbour-banner.png)
 
-Every game, one harbour. A lightweight, controller-friendly launcher for **PC recomps and ports and emulators**,
-side by side on their real console's shelf, kept up to date for you.
+**Your PC ports, recomps and emulators on one shelf per console: installed, kept up to date and set up for you.**
+
+Ship of Harkinian sits on the N64 shelf next to the N64 games you play in an emulator. Harbour installs both kinds
+in a click, updates both in a click, sets the emulators up so games open fullscreen and sharp, and tells you when a
+game you play in an emulator has a PC port. A big-picture, controller-first screen with gameplay clips for every game
+ties it together.
 
 ![The shelf](docs/shelf.png)
 
-## What it does
+## What makes it different
 
-- **One big picture.** The selected game's background art fades into a 45-second HD gameplay clip. Console tabs
-  along the top in release order, covers on a shelf along the bottom. After a while the interface fades and the
-  clip keeps playing like a screensaver.
-- **Recomps and ports where they belong.** A recomp of an N64 game sits on the N64 shelf next to the N64 games you
-  play in an emulator. When you have both, only the port is shown.
-- **One-click updates for recomps and emulators.** Harbour checks each one's releases (GitHub, or Forgejo sites like
-  git.eden-emu.dev), then downloads the right Windows build, checks it against its published checksum, scans it with
-  Windows Defender, backs up the files it replaces and keeps your settings. "Update all" does everything at once.
-  Programs in protected folders (like Program Files) are updated with their own installer after one admin prompt.
-  Update something yourself and Harbour notices.
-- **Emulators in a click.** Harbour knows the well-known emulator for each console (RMG, DuckStation, PCSX2, RPCS3,
-  PPSSPP, xemu, Xenia Canary, Dolphin, melonDS, Azahar, mGBA, Cemu, Eden, Lichii, Flycast, Snes9x, Mesen). Add a
-  games folder, or press Play on a game with no emulator, and Harbour installs the right one from its official
-  releases and sets it up. Games open fullscreen, drawn at a resolution that fits your screen (on a 1440p screen:
-  PS2, GameCube and Xbox at 3×, PS1 at 6×, DS at 8×) instead of the console's own blurry one; change it in the
-  emulator and your choice stays. Emulators with no controller buttons set get a standard pad layout, and a Steam
-  Controller works through Steam.
+- **Ports and emulators, together.** Recomps and ports go on their original console's shelf, next to that console's
+  emulator games. If you have a game both ways, the port is the one shown.
+- **"Install PC port" where it matters.** When a game you play in an emulator has a PC port, a button next to Play
+  says so, along with how well the best port runs (Fully playable, Playable, Experimental).
+- **Over 1,300 ports to browse.** Search the catalogue, pick one and choose your game file. Harbour downloads it,
+  checks it, installs it and shelves it. You can also paste any GitHub link, or add a port you already have.
+- **Emulators that just work.** Add a games folder or press Play, and Harbour installs the right emulator from its
+  official releases. Games open fullscreen, drawn at a resolution that fits your screen (on a 1440p screen: PS2,
+  GameCube and Xbox at 3×, PS1 at 6×, DS at 8×), with a standard pad layout where none is set. Change anything in the
+  emulator and your choice stays.
+- **Updates for everything, one queue.** Ports, emulators and Harbour itself are updated in one click ("Update all"
+  does the lot). Every download is checked against its published checksum and its uploader (an update from a
+  different account is refused), backed up, and keeps your settings. Ports that update themselves say "update in
+  app", and Harbour notices when you've done it.
 
-  ![Installing emulators](docs/emulators.png)
-- **Game folders.** Point Harbour at your games folder and it finds the console subfolders (N64, PS2, Switch…) by
-  their names. New games show up by themselves.
-- **Artwork and clips without accounts.** Covers, logos, backgrounds and screenshots come from the LaunchBox games
-  database, GameTDB and libretro thumbnails. Clips are cut from no-commentary HD longplays with yt-dlp and FFmpeg,
-  which Harbour downloads (and checks) the first time. New games get theirs automatically.
+![The port catalogue](docs/ports.png)
+
+## Everything else
+
+- **One big picture.** The game's background art fades into a 45-second HD gameplay clip. After a while the
+  interface fades and the clip plays on like a screensaver. Clips can be switched off.
+- **Artwork and clips by themselves**, without accounts: covers, logos and backgrounds from the LaunchBox games
+  database, GameTDB and libretro thumbnails; clips cut from no-commentary longplays. 🎲 swaps the background or the
+  clip for another.
+- **Undock** takes a game off the shelves and keeps everything; Settings redocks it. For ports Harbour installed,
+  **Undock and delete** removes only what the install put there: your saves and mods stay in its folder.
 - **Light.** Nothing moves unless you're using it; in the background or while a game runs, Harbour freezes.
-- **Controller first, mouse and keyboard too.** Every screen and dialog works with a pad.
+- **Controller first**, mouse and keyboard too. A Steam Controller works through Steam.
 - **No AI at runtime.** Everything is plain rules and downloads.
 
+![Installing emulators](docs/emulators.png)
+
 Harbour includes no games, ROMs, keys or game data: you bring your own copies, the same as for any emulator or
-recomp.
+port.
 
 ## Getting started
 
 Harbour runs on Windows 10 and 11.
 
 **Download** the latest `Harbour-<version>-win64.zip` from [Releases](https://github.com/goodthanksdev/harbour/releases),
-unzip it anywhere and run `Harbour.exe`. Harbour keeps itself up to date like everything else in it. To start it from
+unzip it anywhere and run `Harbour.exe`. Windows may say "Windows protected your PC" the first time, because Harbour
+isn't code-signed: choose **More info → Run anyway**. Harbour keeps itself up to date after that. To start it from
 Steam, add `Harbour.exe` as a non-Steam game (`Harbour.ico` is next to it).
 
 **From source** (needs [Node.js](https://nodejs.org/)): `git clone`, then `npm install` and `npm start`.
@@ -54,13 +63,13 @@ Steam, add `Harbour.exe` as a non-Steam game (`Harbour.ico` is next to it).
 Then, in Harbour:
 
 1. **Pick your games folder** (Harbour asks the first time; later: Settings → Emulators & game folders → Manage).
-   Emulators for those consoles install by themselves; add ones you already have with ＋ → Emulator.
-2. **＋ → PC port / recomp**: pick one from the catalogue (or paste its GitHub page) and choose your game file.
-   Harbour downloads it, checks it, installs it into `Ports\` with your game file, and puts it on the right shelf.
-   Already installed one? "Already installed…" picks its folder and Harbour works out the rest.
+   It finds the console folders inside (N64, PS2, Switch…), and emulators for those consoles install by themselves.
+2. **＋ → PC port / recomp**: pick one from the catalogue (or paste its GitHub page) and choose your game file, or
+   "Already installed…" for one you have.
 3. Artwork and clips arrive by themselves.
 
-Everything Harbour keeps (settings, artwork, clips, logs) lives in `data\` next to it, so updates never touch it.
+Everything Harbour keeps (settings, artwork, clips, logs) lives in `data\` next to it; emulators and ports it installs
+go in `Emulators\` and `Ports\`. Updates to Harbour never touch them.
 
 ## Controls
 
@@ -68,7 +77,7 @@ Everything Harbour keeps (settings, artwork, clips, logs) lives in `data\` next 
 |---|---|---|
 | A | Enter or Space | Play |
 | B | Esc | Back / close |
-| X | X | More (favourite, rename, change cover art, clip or video, undock…) |
+| X | X | More (favourite, rename, cover art, clip, PC port, undock…) |
 | Y | U | Update this game |
 | LB / RB | Q / E or ↑ / ↓ | Previous / next console |
 | LT / RT | Page Up / Page Down | Jump along the shelf |
@@ -83,11 +92,18 @@ Everything Harbour keeps (settings, artwork, clips, logs) lives in `data\` next 
   `ui\sounds\` (in a release: `resources\app\ui\sounds\`) and it replaces that built-in sound.
 - **Logo and icons** are drawn by `scripts/build-harbour-brand.cjs`; `npm run brand:build` rebuilds them.
 
-## Credits
+## Built on
 
-Harbour started from [PyroCade](https://github.com/Pyrodrifter/PyroCade) by Pyrodrifter, and its library engine is
-still based on PyroCade's code. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for that and the other tools and
-data sources Harbour uses.
+- [PyroCade](https://github.com/Pyrodrifter/PyroCade) by Pyrodrifter: Harbour started from it, and its library
+  engine is still based on PyroCade's code.
+- [Recompendium](https://recompendium.com/): the port catalogue (CC BY-SA 4.0).
+- The [LaunchBox Games Database](https://gamesdb.launchbox-app.com/), [GameTDB](https://www.gametdb.com/) and
+  [libretro thumbnails](https://thumbnails.libretro.com/): game details and artwork.
+- [Electron](https://www.electronjs.org/), [yt-dlp](https://github.com/yt-dlp/yt-dlp) and
+  [FFmpeg](https://ffmpeg.org/).
+- And every emulator and port it installs, each from its own project's official releases under its own licence.
+
+Details in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## License
 
