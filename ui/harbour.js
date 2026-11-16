@@ -725,9 +725,7 @@ async function addGameFolder(system) {
     toast(`Added ${r.added.map(a => sysName(a.system)).join(', ')}. Finding games…`, 5000);
     S.config = await api.getConfig();
     await reload(); renderEmulators();
-    // Consoles with games but no emulator get the well-known one, installed in the background.
-    const missing = [...new Set(r.added.map(a => a.system))].filter(id => S.games.some(g => g.system === id) && !S.config.systems.find(s => s.id === id)?.emulator);
-    if (missing.length) installFor(missing).then(() => renderEmulators());
+    // No emulator is installed unasked: a game whose console has none shows "Install emulator" instead of Play.
     const fresh = S.games.filter(g => r.added.some(a => a.system === g.system) && !g.media?.front && !g.recomp);
     // New games get their artwork, then a gameplay clip each, without being asked.
     if (fresh.length) { downloadArt('library'); downloadVideos('library', '', 'missing'); }
