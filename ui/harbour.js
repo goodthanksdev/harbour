@@ -357,9 +357,10 @@ function openMenu(anchor) {
   if (!g.recomp) add('Install PC port…', () => portsForGame(g));
   add('Rename…', () => openRename(g));
   add('Open game folder', () => api.openGameFolder(g.id).catch(e => toast(e.message)));
-  // 🎲: cover art = the next of the database's backgrounds (the big picture behind the game; the box cover stays);
-  // clip = another part of the same video; video = a different video.
-  add('🎲 Change cover art', () => downloadArt('game', g.id, [g.media?.fanart || !g.media?.screenshot ? 'fanart' : 'screenshot']));
+  // 🎲: background art = the next of the database's backgrounds (the big picture behind the game); box art = the
+  // next cover; clip = another part of the same video; video = a different video.
+  add('🎲 Change background art', () => downloadArt('game', g.id, [g.media?.fanart || !g.media?.screenshot ? 'fanart' : 'screenshot']));
+  add('🎲 Change box art', () => downloadArt('game', g.id, ['front']));
   if (videosOn() && g.media?.video) {
     add('🎲 Different clip', () => downloadVideos('game', g.id, 'reroll'));
     add('🎲 Change video', () => downloadVideos('game', g.id, 'new'));
@@ -871,8 +872,9 @@ api.onVideoProgress?.(job => {
 });
 // reroll: the kinds to swap for the next of the database's pictures (else missing pictures are downloaded).
 function downloadArt(scope, gameId, reroll = null) {
-  return enqueue(`art:${scope}:${gameId || ''}${reroll ? ':next' : ''}`, reroll ? 'Changing cover art' : 'Artwork', () => new Promise((resolve, reject) => {
-    S.artBusy = true; S.artReroll = !!reroll; mainJob.art = resolve;
+  const what = reroll?.[0] === 'front' ? 'box art' : 'background art';
+  return enqueue(`art:${scope}:${gameId || ''}${reroll ? ':next:' + reroll[0] : ''}`, reroll ? `Changing ${what}` : 'Artwork', () => new Promise((resolve, reject) => {
+    S.artBusy = true; S.artReroll = reroll ? what : false; mainJob.art = resolve;
     api.artStart({ scope, gameId, types: reroll || ['front', 'fanart', 'logo', 'screenshot'], retryMissing: true, upgrade: false, reroll: !!reroll })
       .catch(e => { S.artBusy = false; mainJob.art = null; reject(e); });
   }));
@@ -883,7 +885,8 @@ api.onArtProgress?.(job => {
   const finish = mainJob.art; mainJob.art = null; S.artBusy = false;
   // Changed pictures keep their file names: a new ?v= makes the window load them again instead of its cached copies.
   if (S.artReroll) S.artBust = Date.now();
-  const msg = S.artReroll ? (job.downloaded ? 'New cover art' : 'No other cover art for this game') : `Artwork done: ${job.downloaded} new image${job.downloaded === 1 ? '' : 's'}`;
+  const msg = S.artReroll ? (job.downloaded ? `New ${S.artReroll}` : `No other ${S.artReroll} for this game`) : `Artwork done: ${job.downloaded} new image${job.downloaded === 1 ? '' : 's'}`;
+  if (S.artReroll) toast(msg, 4000);  // asked for by hand: always say what happened
   reload().then(() => finish?.(S.artReroll && !job.downloaded ? { fail: msg } : { done: msg }));
 });
 
