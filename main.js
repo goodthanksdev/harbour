@@ -1667,7 +1667,7 @@ handle('library:saveUi', patch => {
 // ---------- Adding things the easy way ----------
 // A PC port / recomp: pick its folder; the game's .exe is found by itself when there's only one real
 // candidate (helpers like uninstallers, crash reporters and redistributables don't count).
-const HELPER_EXE = /unins|setup|install|crash|report|redist|vcredist|dxsetup|updater|update|ffmpeg|ffprobe|7z|helper|cli\.exe$|dotnet|vc_|createdump/i;
+const HELPER_EXE = /unins|setup|install|crash_?(pad|handler|report|dump|sender|upload)|report|redist|clang|lld-link|xbe_recomp|vcredist|dxsetup|updater|update|ffmpeg|ffprobe|7z|helper|cli\.exe$|dotnet|vc_|createdump/i;
 function findGameExe(folder) {
   const found = [];
   const walk = (dir, depth) => {
