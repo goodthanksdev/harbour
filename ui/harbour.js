@@ -331,8 +331,15 @@ async function checkUpdates(force = false) {
   if (force) Activity.set('check', 'Checking for updates…');
   try { Object.assign(S.recomp, await api.recompCheckAll(force)); } catch (e) { if (force) Activity.fail('check', `Update check failed: ${e.message}`); return; }
   S.self = await api.selfStatus(force).catch(() => S.self);  // Harbour itself (only in a release)
+  if (force) await loadEmulators(true);
   refreshBadges(); showGame(S.list[S.sel]);
-  if (force) { const n = pendingUpdates().length; Activity.done('check', n ? `${n} update${n === 1 ? '' : 's'} available` : 'Everything is up to date'); }
+  if (force) {
+    // Harbour's own state always comes first, so it's never lost among game and emulator updates.
+    const others = pendingUpdates().filter(u => u.kind !== 'harbour').length;
+    const msg = (S.self?.updateAvailable ? `Harbour ${S.self.latest?.tag || ''} is out` : 'Harbour is up to date')
+      + (others ? ` · ${others} other update${others === 1 ? '' : 's'}` : ' · so is everything else');
+    Activity.done('check', msg); toast(msg, 5000);
+  }
 }
 
 // ---------- ••• menu ----------
