@@ -377,7 +377,7 @@ function showGame(g) {
   const ports = portsFor(g), best = ports.map(x => x.status).sort((a, b) => (TIER[a] ?? 3) - (TIER[b] ?? 3))[0];
   // Next to the button: small, in brackets, in the catalogue's colour for it.
   $('#btnPort').hidden = $('#portTier').hidden = !ports.length;
-  if (ports.length) { $('#portTier').className = `tier ${best}`; $('#portTier').textContent = `(${STATUS[best] || best})`; }
+  if (ports.length) { $('#portTier').className = `tier ${best}`; $('#portTier').textContent = `(${STATUS[best] || best})`; if (ports.some(x => x.harbour)) { $('#portTier').classList.add('harbour'); $('#portTier').prepend(harbourMark()); } }
   const up = $('#btnUpdate');
   up.hidden = !st?.updateAvailable; up.className = 'new';
   up.textContent = st?.updateAvailable ? (st.auto ? `⬆ Update to ${st.latest.tag}` : `${st.latest.tag}: update in app`) : '';
@@ -570,6 +570,10 @@ async function showPortCatalog(prefill = null) {
   (prefill ? $('#portCatalog button:not([disabled])') : $('#catSearch'))?.focus();
 }
 const STATUS = { fully: 'Fully playable', playable: 'Playable', experimental: 'Experimental' };
+// Harbour's own ports: its mark, in white.
+function harbourMark() {
+  const m = el('img', 'hb-mark'); m.src = 'assets/brand/harbour-mark.svg'; m.alt = ''; m.title = "Harbour's own port"; return m;
+}
 const TIER = { fully: 0, playable: 1, experimental: 2 };
 function renderPortCatalog() {
   const q = looseText($('#catSearch').value), only = $('#catConsole').value;
@@ -584,9 +588,10 @@ function renderPortCatalog() {
     // Console · which port it is (two ports of one game look alike otherwise); how well it runs sits on the right.
     // (a project named after the game, "Ocarina of Time (N64)", shows its own short name instead)
     info.append(el('b', '', x.name), el('small', '', `${x.consoleName} · ${x.project.includes(x.name) ? x.repo.split('/')[1] : x.project}`));
-    const tier = el('span', `tier ${x.status}`, STATUS[x.status] || x.status);
+    const tier = el('span', `tier ${x.status}${x.harbour ? ' harbour' : ''}`, STATUS[x.status] || x.status);
+    if (x.harbour) tier.prepend(harbourMark());  // Harbour's own: its mark over the rating
     // No release to download yet: its page instead (source code only, or still being made).
-    const btn = el('button', x.installed || !x.released ? '' : 'primary', x.installed ? 'Installed' : x.released ? 'Choose' : 'Page'); btn.type = 'button';
+    const btn = el('button', x.installed || !x.released ? '' : 'primary', x.installed ? 'Installed' : x.released ? 'Install' : 'Page'); btn.type = 'button';
     btn.disabled = x.installed; btn.title = x.released ? '' : 'No download yet: opens its GitHub page';
     btn.onclick = () => x.released ? pickFromCatalog(x) : window.open(`https://github.com/${x.repo}`);
     card.append(info, tier, btn); return card;

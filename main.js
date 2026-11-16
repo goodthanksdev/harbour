@@ -1927,6 +1927,12 @@ handle('harbour:pickGameFile', async () => {
 // Only what Harbour shows is kept: the game, the project, its GitHub page, its console and what it needs from you.
 const CATALOG_FILE = path.join(DATA, 'media', '_index', 'recompendium.json');
 const CATALOG_CONSOLES = { gamecube: 'gc', megadrive: 'genesis' };
+// Harbour's own ports, listed with Recompendium's and marked as Harbour's (not rated by Recompendium).
+// romDir: the folder beside the program the game file goes in.
+const HARBOUR_PORTS = [
+  { name: 'Crash Nitro Kart', project: 'Crash Nitro Komp', repo: 'goodthanksdev/crash-nitro-komp', console: 'xbox', consoleName: 'Xbox',
+    status: 'playable', needs: 'Crash Nitro Kart (Xbox) disc image', stars: 0, year: 2003, released: true, harbour: true, romDir: 'assets' },
+];
 handle('harbour:portCatalog', async () => {
   let cached = null;
   try { cached = JSON.parse(await fsp.readFile(CATALOG_FILE, 'utf8')); } catch {}
@@ -1944,7 +1950,7 @@ handle('harbour:portCatalog', async () => {
     } catch (e) { if (!cached) throw e; }  // offline: last week's list is fine
   }
   const have = new Set(config.extraGames.map(x => x.source?.repo?.toLowerCase()).filter(Boolean));
-  return cached.list.map(x => ({ ...x, platform: config.systems.some(s => s.id === x.console) ? x.console : '', installed: have.has(x.repo.toLowerCase()) }));
+  return [...cached.list, ...HARBOUR_PORTS].map(x => ({ ...x, platform: config.systems.some(s => s.id === x.console) ? x.console : '', installed: have.has(x.repo.toLowerCase()) }));
 });
 const installingPorts = new Set();
 handle('harbour:installPort', async ({ repo: link, rom, title, platform }) => {
@@ -1978,7 +1984,8 @@ handle('harbour:installPort', async ({ repo: link, rom, title, platform }) => {
     const exe = findGameExe(folder) || guessProgram(folder, repo);
     if (!exe) { await fsp.rm(folder, { recursive: true, force: true }); throw notReady(); }
     const returning = (await filesIn(folder)).length > (await filesIn(src)).length;  // your files were already there
-    if (rom) await fsp.copyFile(rom, path.join(path.dirname(exe), path.basename(rom)));
+    const romDir = path.join(path.dirname(exe), HARBOUR_PORTS.find(x => x.repo.toLowerCase() === repo.toLowerCase())?.romDir || '');
+    if (rom) { await fsp.mkdir(romDir, { recursive: true }); await fsp.copyFile(rom, path.join(romDir, path.basename(rom))); }
     const installed = { tag: rel.tag, assetId: rel.assetId, date: rel.publishedAt, uploader: rel.uploader || undefined };
     // From the catalogue the name and console are known; otherwise Harbour works them out.
     const found = title ? { title: String(title).slice(0, 120), platform: config.systems.some(s => s.id === platform) ? platform : '' }

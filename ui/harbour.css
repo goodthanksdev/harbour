@@ -198,6 +198,11 @@ dialog a { color: var(--accent); }
 .emu-cat .tier { flex: none; width: calc(130 * var(--u)); text-align: right; font-size: .85em; font-weight: 600; margin-left: auto; }
 #portTier { font-size: .8em; font-weight: 700; align-self: center; margin: 0 calc(4 * var(--u)) 0 calc(-4 * var(--u)); text-shadow: 0 1px 6px rgba(0,0,0,.6); }
 .tier.fully { color: var(--accent); }
+.hb-mark { height: .95em; width: auto; vertical-align: -.12em; margin-left: .4em; filter: brightness(0) invert(1); }
+#portTier.harbour { color: #fff; }
+#portTier.harbour .hb-mark { margin: 0 .35em 0 0; }
+.emu-cat .tier.harbour { color: #fff; width: auto; display: flex; align-items: center; gap: .4em; }
+.emu-cat .tier.harbour .hb-mark { margin: 0; height: 1.15em; }
 .tier.playable { color: #8fb8ff; }
 .tier.experimental { color: var(--beam); }
 .cat-filters { display: flex; gap: calc(10 * var(--u)); margin-bottom: calc(12 * var(--u)); }
