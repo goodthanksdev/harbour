@@ -275,3 +275,5 @@ dialog :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 #searchHits .sys { margin-left: auto; color: var(--muted); font-size: .85em; flex: none; }
 #searchHits .none { color: var(--muted); padding: calc(10 * var(--u)); }
 #addEmuPick .dlg-actions button { white-space: nowrap; padding-left: calc(14 * var(--u)); padding-right: calc(14 * var(--u)); }
+.emu-catalog .emu-group { margin: calc(14 * var(--u)) 0 calc(4 * var(--u)); font-size: .78em; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+.emu-catalog .emu-group:first-child { margin-top: 0; }

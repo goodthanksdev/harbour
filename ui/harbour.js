@@ -1186,18 +1186,23 @@ async function showEmuCatalog() {
   const list = await api.emulatorCatalog().catch(() => []);
   const counts = {};
   for (const g of S.games) counts[g.system] = (counts[g.system] || 0) + 1;
-  // Emulators for consoles you have games for come first.
-  list.sort((a, b) => Number(b.consoles.some(c => counts[c])) - Number(a.consoles.some(c => counts[c])));
-  $('#emuCatalog').replaceChildren(...list.map(c => {
+  // Under a heading for the console(s) each plays: consoles you have games for first, then in release order.
+  const has = c => Number(c.consoles.some(x => counts[x]));
+  list.sort((a, b) => (has(b) - has(a)) || (releaseRank(a.consoles[0]) - releaseRank(b.consoles[0])));
+  const out = []; let heading = null;
+  for (const c of list) {
+    const h = c.consoles.map(sysName).join(' · ');
+    if (h !== heading) { heading = h; out.push(el('h4', 'emu-group', h)); }
     const card = el('div', 'emu-cat');
     const info = el('div', 'emu-cat-info');
-    info.append(el('b', '', c.name), el('small', '', c.consoles.map(sysName).join(', ') + (c.note ? ` · ${c.note}` : '')));
+    info.append(el('b', '', c.name), el('small', '', c.note || ''));
     const btn = el('button'); btn.type = 'button'; btn.dataset.id = c.id; btn.dataset.installed = c.installed ? '1' : '';
     btn.onclick = () => installEmulator(c);
     catalogButton(btn);
     card.append(info, btn);
-    return card;
-  }));
+    out.push(card);
+  }
+  $('#emuCatalog').replaceChildren(...out);
   $('#emuCatalog').querySelector('button:not([disabled])')?.focus();
 }
 // Installs the catalogue's emulator for each of these consoles that has none. True when they all have one after.
