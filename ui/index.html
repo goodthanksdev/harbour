@@ -21,6 +21,7 @@
     <div class="top-right">
       <button id="updatePill" class="pill new" hidden title="See and install updates"></button>
       <span id="clock"></span>
+      <button id="btnSearch" class="icon-btn" title="Search (Ctrl+F)" aria-label="Search"><svg viewBox="0 0 24 24" width="0.9em" height="0.9em" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5 21 21"/></svg></button>
       <button id="btnAdd" class="icon-btn" title="Add a game or emulator" aria-label="Add a game or emulator">＋</button>
       <button id="btnSettings" class="icon-btn" title="Settings (Start)" aria-label="Settings">⚙</button>
     </div>
@@ -153,6 +154,11 @@
       <label>Launch options <small>(advanced: {rom} is the game file)</small><input name="args" value="{rom}" autocomplete="off" spellcheck="false" /></label>
       <div class="dlg-actions"><button type="button" class="addBack">Back</button><button class="primary">Choose program…</button></div>
     </form>
+  </dialog>
+
+  <dialog id="searchDlg">
+    <input id="searchBox" type="search" placeholder="Search your games" autocomplete="off" spellcheck="false" />
+    <div id="searchHits"></div>
   </dialog>
 
   <dialog id="renameDlg">

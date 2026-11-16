@@ -264,3 +264,13 @@ dialog :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .emu-cat button.busy { display: inline-flex; align-items: center; gap: .5em; }
 .emu-cat button.busy::before { content: ''; width: .85em; height: .85em; border-radius: 50%; border: 2px solid rgba(255,255,255,.25); border-top-color: var(--accent); animation: spin .8s linear infinite; }
 .emu-cat button:disabled:not(.busy):not(.waiting) { opacity: .5; }
+
+/* Library search */
+#searchDlg { padding: calc(18 * var(--u)); }
+#searchBox { width: 100%; box-sizing: border-box; font-size: calc(22 * var(--u)); }
+#searchHits { margin-top: calc(10 * var(--u)); max-height: 60vh; overflow-y: auto; }
+#searchHits button { display: flex; align-items: center; gap: calc(12 * var(--u)); width: 100%; text-align: left; background: none; border-color: transparent; padding: calc(6 * var(--u)) calc(10 * var(--u)); }
+#searchHits button.on, #searchHits button:hover, #searchHits button:focus-visible { background: rgba(255,255,255,.07); }
+#searchHits img, #searchHits .noart { width: calc(40 * var(--u)); height: calc(54 * var(--u)); object-fit: cover; border-radius: 4px; flex: none; background: rgba(255,255,255,.05); }
+#searchHits .sys { margin-left: auto; color: var(--muted); font-size: .85em; flex: none; }
+#searchHits .none { color: var(--muted); padding: calc(10 * var(--u)); }

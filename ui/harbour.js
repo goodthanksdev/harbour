@@ -868,6 +868,55 @@ api.onArtProgress?.(job => {
   reload().then(() => finish?.(S.artReroll && !job.downloaded ? { fail: msg } : { done: msg }));
 });
 
+// ---------- search ----------
+// Every console at once: all the words you type, in any order, ignoring case, accents and punctuation.
+const searchKey = t => t.toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+const searchKeys = new Map();
+let searchHits = [], searchSel = 0;
+function openSearch() {
+  if (document.querySelector('dialog[open]')) return;
+  UISound.play('open');
+  $('#searchBox').value = ''; renderSearch();
+  $('#searchDlg').showModal(); $('#searchBox').focus();
+}
+function renderSearch() {
+  const words = searchKey($('#searchBox').value).split(' ').filter(Boolean);
+  const key = g => { let k = searchKeys.get(g.title); if (k == null) searchKeys.set(g.title, k = searchKey(g.title)); return k; };
+  const all = S.games.filter(visible);
+  searchHits = !words.length ? [] : all.filter(g => words.every(w => key(g).includes(w)))
+    .sort((a, b) => (key(b).startsWith(words[0]) - key(a).startsWith(words[0])) || a.title.localeCompare(b.title));
+  searchSel = 0;
+  const box = $('#searchHits'); box.replaceChildren();
+  if (!words.length) { box.append(el('div', 'none', `${all.length.toLocaleString()} games`)); return; }
+  if (!searchHits.length) { box.append(el('div', 'none', 'No matches')); return; }
+  for (const g of searchHits.slice(0, 80)) {
+    const b = el('button'); b.type = 'button';
+    const front = pic(g.media?.front);
+    if (front) { const img = el('img'); img.src = front; img.loading = 'lazy'; img.alt = ''; b.append(img); } else b.append(el('span', 'noart'));
+    b.append(el('span', '', g.title), el('span', 'sys', shortName(sysOf(g.system).name)));
+    b.onclick = () => pickSearch(g);
+    box.append(b);
+  }
+  if (searchHits.length > 80) box.append(el('div', 'none', `+${(searchHits.length - 80).toLocaleString()} more, keep typing`));
+  markSearch();
+}
+function markSearch() { [...$('#searchHits').querySelectorAll('button')].forEach((b, i) => { b.classList.toggle('on', i === searchSel); if (i === searchSel) b.scrollIntoView({ block: 'nearest' }); }); }
+function pickSearch(g) {
+  $('#searchDlg').close();
+  UISound.play('select');
+  const keep = S.tab === 'all' || (S.tab === 'favorites' && g.favorite);
+  setTab(keep ? S.tab : g.system);
+  select(S.list.findIndex(x => x.id === g.id));
+}
+$('#btnSearch').onclick = () => openSearch();
+$('#searchBox').addEventListener('input', renderSearch);
+$('#searchBox').addEventListener('keydown', e => {
+  const n = Math.min(searchHits.length, 80);
+  if (e.key === 'ArrowDown' && n) { e.preventDefault(); searchSel = (searchSel + 1) % n; markSearch(); }
+  else if (e.key === 'ArrowUp' && n) { e.preventDefault(); searchSel = (searchSel - 1 + n) % n; markSearch(); }
+  else if (e.key === 'Enter') { e.preventDefault(); if (searchHits[searchSel]) pickSearch(searchHits[searchSel]); }
+});
+
 // ---------- input: keyboard, mouse, controller ----------
 function poke() {
   S.lastInput = Date.now();
@@ -929,10 +978,12 @@ function act(a) {
     case 'more': UISound.play('open'); openMenu($('#btnMore')); break;
     case 'settings': UISound.play('open'); openSettings(); break;
     case 'updates': openUpdates(); break;
+    case 'search': openSearch(); break;
   }
 }
 addEventListener('keydown', e => {
   if (e.target.closest('dialog') && !['Escape'].includes(e.key)) { poke(); return; }
+  if ((e.ctrlKey && e.key.toLowerCase() === 'f') || (e.key === '/' && !e.ctrlKey)) { e.preventDefault(); if (!poke()) act('search'); return; }
   const map = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: S.menuOpen ? 'up' : 'tabprev', ArrowDown: S.menuOpen ? 'down' : 'tabnext',
     Enter: 'ok', ' ': 'ok', Escape: 'back', PageUp: 'pgleft', PageDown: 'pgright', q: 'tabprev', e: 'tabnext', u: 'update', x: 'more', F1: 'settings' };
   const a = map[e.key]; if (!a) { poke(); return; }
@@ -956,7 +1007,7 @@ function pollPads() {
       continue;
     }
     const keys = { left: b(14) || ax(0, -1), right: b(15) || ax(0, 1), up: b(12) || ax(1, -1), down: b(13) || ax(1, 1),
-      ok: b(0), back: b(1), more: b(2), update: b(3), tabprev: b(4), tabnext: b(5), pgleft: b(6), pgright: b(7), settings: b(9), updates: b(8) };
+      ok: b(0), back: b(1), more: b(2), update: b(3), tabprev: b(4), tabnext: b(5), pgleft: b(6), pgright: b(7), settings: b(9), updates: b(8), search: b(10) };
     for (const [k, down] of Object.entries(keys)) {
       const key = p.index + k, t = held.get(key);
       if (!down) { held.delete(key); continue; }
