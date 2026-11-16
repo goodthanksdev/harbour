@@ -1908,6 +1908,77 @@ handle('harbour:addEmulator', async ({ name, systems, args, makeDefault }) => {
   saveConfig(config);
   return { id, name: label };
 });
+// ---- Finding emulators you already have ----
+// Program names Harbour recognises: the ones it can install (their release source too, so they get updates), and
+// other common ones it can only run.
+const EMU_FIND = [
+  { re: /^rmg\.exe$/i, catalog: 'rmg' },
+  { re: /^duckstation-qt.*\.exe$/i, catalog: 'duckstation' },
+  { re: /^pcsx2-qt.*\.exe$/i, catalog: 'pcsx2' },
+  { re: /^rpcs3\.exe$/i, catalog: 'rpcs3' },
+  { re: /^shadps4\.exe$/i, catalog: 'shadps4' },
+  { re: /^ppssppwindows(64)?\.exe$/i, catalog: 'ppsspp' },
+  { re: /^xemu\.exe$/i, catalog: 'xemu' },
+  { re: /^xenia_canary\.exe$/i, catalog: 'xenia-canary' },
+  { re: /^melonds\.exe$/i, catalog: 'melonds' },
+  { re: /^azahar\.exe$/i, catalog: 'azahar' },
+  { re: /^mgba\.exe$/i, catalog: 'mgba' },
+  { re: /^cemu\.exe$/i, catalog: 'cemu' },
+  { re: /^dolphin\.exe$/i, catalog: 'dolphin' },
+  { re: /^eden\.exe$/i, catalog: 'eden' },
+  { re: /^lichii\.exe$/i, catalog: 'lichii' },
+  { re: /^flycast\.exe$/i, catalog: 'flycast' },
+  { re: /^snes9x(-x64)?\.exe$/i, catalog: 'snes9x' },
+  { re: /^mesen\.exe$/i, catalog: 'mesen' },
+  { re: /^ryujinx\.exe$/i, name: 'Ryujinx', consoles: ['switch'], args: '{rom}' },
+  { re: /^(yuzu|citron|suyu|sudachi|torzu)\.exe$/i, consoles: ['switch'], args: '-g {rom}' },
+  { re: /^project64\.exe$/i, name: 'Project64', consoles: ['n64'], args: '{rom}' },
+  { re: /^xenia\.exe$/i, name: 'Xenia', consoles: ['x360'], args: '{rom}' },
+  { re: /^(citra-qt|lime3ds(-gui)?)\.exe$/i, consoles: ['3ds'], args: '{rom}' },
+  { re: /^redream\.exe$/i, name: 'redream', consoles: ['dreamcast'], args: '{rom}' },
+  { re: /^bsnes\.exe$/i, name: 'bsnes', consoles: ['snes'], args: '{rom}' },
+];
+const SCAN_SKIP = /^(\$recycle\.bin|system volume information|windows|node_modules|\.git|cache|shadercache|shaders|logs?|screenshots|saves?|nand|sdmc|dev_hdd0|memcards)$/i;
+// Pick a folder; every emulator found in it (four folders deep) is added for its consoles, and becomes the one a
+// console uses when that console has none that works. Ones already added are left alone.
+handle('harbour:scanEmulators', async folder => {
+  const r = typeof folder === 'string' ? { canceled: false, filePaths: [folder] }  // tests pass the folder
+    : await dialog.showOpenDialog(win, { title: 'Choose a folder with your emulators in it', properties: ['openDirectory'] });
+  if (r.canceled) return null;
+  const found = new Map();  // kind -> exe
+  let looked = 0;
+  const walk = (dir, depth) => {
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (++looked > 200000) return;
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) { if (depth < 4 && !SCAN_SKIP.test(e.name)) walk(p, depth + 1); continue; }
+      const k = EMU_FIND.find(f => f.re.test(e.name));
+      if (!k) continue;
+      const kind = k.catalog || e.name.toLowerCase();
+      if (!found.has(kind)) found.set(kind, { k, exe: p });
+    }
+  };
+  walk(r.filePaths[0], 0);
+  const known = new Set(config.customEmulators.map(e => resolveExe(e.id)?.toLowerCase()).filter(Boolean));
+  const added = [], skipped = [];
+  for (const { k, exe } of found.values()) {
+    const c = k.catalog && CATALOG.find(x => x.id === k.catalog);
+    const name = c?.name || k.name || titleFromFolder(path.basename(exe, path.extname(exe)));
+    const id = 'custom-' + (c ? c.id : name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''));
+    if (known.has(exe.toLowerCase()) || (resolveExe(id) && config.customEmulators.some(e => e.id === id))) { skipped.push(name); continue; }
+    const consoles = (c?.consoles || k.consoles).filter(s => config.systems.some(x => x.id === s));
+    config.customEmulators = config.customEmulators.filter(e => e.id !== id);
+    config.customEmulators.push({ id, name, exe, args: c?.args || k.args, systems: consoles,
+      ...(c ? { source: { ...c.source, prerelease: false }, scanned: true } : {}) });
+    for (const s of config.systems) if (consoles.includes(s.id) && !resolveExe(s.emulator)) s.emulator = id;
+    added.push(name);
+  }
+  if (added.length) saveConfig(config);
+  log(`emulator scan of ${r.filePaths[0]}: added ${added.join(', ') || 'none'}; already had ${skipped.join(', ') || 'none'}`);
+  return { added, skipped };
+});
 // ---- Installing a well-known emulator (emulators.js) ----
 // Into an Emulators folder beside Harbour's data, ready for its consoles, with updates from where it's released.
 const EMULATORS_DIR = path.join(path.dirname(DATA), 'Emulators');
@@ -2090,6 +2161,11 @@ async function checkEmulator(id, force = false) {
   try {
     const latest = await latestEmulatorRelease(e.source, e.source.prerelease);
     recompChecks.set(key, { at: Date.now(), latest, repo: sig }); saveRecompChecks();
+    if (e.scanned && !e.installed) {  // found by a folder scan: its version is unknown until the first check
+      const st = fileStamp(resolveExe(e.id) || ''), released = Date.parse(latest.published || latest.publishedAt || '') || Infinity;
+      e.installed = st && st.mtime >= released ? { tag: latest.tag, stamp: st.id } : { tag: 'older' };
+      delete e.scanned; saveConfig(config);
+    }
     return emulatorUpdateStatus(e, latest);
   } catch (err) { return emulatorUpdateStatus(e, hit?.latest, err.message); }
 }

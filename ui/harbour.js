@@ -575,6 +575,18 @@ $('#addEmu').addEventListener('submit', async e => {
   } catch (err) { UISound.play('error'); toast(err.message, 6000); }
 });
 
+// Every emulator in a folder you pick, added at once.
+$('#emuScan').onclick = async () => {
+  try {
+    const r = await api.scanEmulators();
+    if (!r) return;
+    S.config = await api.getConfig(); await loadEmulators(true);
+    renderRow(); select(S.sel, true); showEmuCatalog();
+    if (r.added.length) { UISound.play('select'); toast(`Added ${r.added.join(', ')}.`, 6000); }
+    else toast(r.skipped.length ? `Found ${r.skipped.join(', ')}, already added.` : 'No emulators found in that folder.', 6000);
+  } catch (err) { UISound.play('error'); toast(err.message, 6000); }
+};
+
 // ---------- emulators: see, change, remove ----------
 const sysName = id => shortName(S.config.systems.find(s => s.id === id)?.name || id);
 async function openEmulators() {

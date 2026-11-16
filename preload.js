@@ -45,6 +45,7 @@ contextBridge.exposeInMainWorld('api', {
   emuPickExe: id => call('emu:pickExe', id),
   emuRemove: id => call('emu:remove', id),
   addEmulator: options => call('harbour:addEmulator', options),
+  scanEmulators: folder => call('harbour:scanEmulators', folder),
   setEmulator: options => call('harbour:setEmulator', options),
   setSystemEmulator: options => call('harbour:setSystemEmulator', options),
   setEmulatorSource: options => call('harbour:setEmulatorSource', options),
