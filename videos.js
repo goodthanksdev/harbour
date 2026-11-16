@@ -185,7 +185,7 @@ function createVideoService({ dataDir, ghJson, download, extract, sha256File, de
     if (job?.status === 'running') throw new Error('Videos are already downloading');
     if (replace && mode === 'missing') mode = 'new';
     const games = getGames().filter(g => !g.demo && (scope !== 'game' || g.id === gameId) && (mode !== 'missing' || !g.media?.video));
-    if (!games.length) throw new Error(scope === 'game' ? 'This game already has a video.' : 'Every game already has a video.');
+    if (!games.length) throw new Error(scope === 'game' ? 'This game already has a video, or its videos are off.' : 'Every game already has a video.');
     cancelled = false;
     job = { status: 'running', stage: 'Getting ready…', total: games.length, done: 0, saved: 0, noLink: 0, failed: 0, lastTitle: '', errors: [] };
     emit({ ...job });

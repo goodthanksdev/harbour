@@ -70,7 +70,7 @@ function untilCancelled(promise, signal) {
   return Promise.race([promise, stop]).finally(() => signal.removeEventListener('abort', onAbort));
 }
 
-function createArtworkService({ dataDir, getSystems, getGames, normalize, fetchImpl = fetch, onProgress = () => {},
+function createArtworkService({ dataDir, getSystems, getGames, wants = () => true, normalize, fetchImpl = fetch, onProgress = () => {},
   source = 'https://thumbnails.libretro.com', decodeImage, launchbox = null, encodeImage = null,
   switchDatabase = 'https://www.gametdb.com/switchtdb.txt?LANG=EN', switchImages = 'https://art.gametdb.com/switch' }) {
   const indexFolder = path.join(dataDir, 'media', '_index');
@@ -407,7 +407,8 @@ function createArtworkService({ dataDir, getSystems, getGames, normalize, fetchI
       result.unsupported = true;
       return result;
     }
-    const outcomes = await Promise.all(kinds.map(kind => onePicture(game, kind, options).catch(e => {
+    // Kinds switched off (for everything or this game) aren't downloaded; a reroll is asked for by hand.
+    const outcomes = await Promise.all(kinds.filter(k => options.reroll || wants(game, k)).map(kind => onePicture(game, kind, options).catch(e => {
       if (options.signal?.aborted) throw e;
       return { error: e.message };
     })));

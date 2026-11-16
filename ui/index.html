@@ -68,9 +68,12 @@
     <div class="set-row"><span>Undocked games</span><button id="setUnhide">Redock</button></div>
     <div class="set-row"><span>PC ports install to</span><span class="dir-pick"><small id="dirPorts"></small><button id="setDirPorts">Change…</button></span></div>
     <div class="set-row"><span>Emulators install to</span><span class="dir-pick"><small id="dirEmus"></small><button id="setDirEmus">Change…</button></span></div>
-    <h3>Video</h3>
-    <div class="set-row"><span>Game videos</span><select id="setVideosOn"><option value="1">On</option><option value="0">Off</option></select></div>
-    <div class="set-row"><span>Clips</span><button id="setClearVideos">Delete all</button></div>
+    <h3>Media</h3>
+    <div class="set-row"><span>Download automatically</span><select id="setAutoMedia"><option value="1">On</option><option value="0">Off</option></select></div>
+    <div class="set-row media-row" data-kind="box"><span>Box art</span><span class="btn-pair"><select class="media-on"><option value="1">On</option><option value="0">Off</option></select><button class="media-manage">Manage</button><button class="media-clear">Delete all</button></span></div>
+    <div class="set-row media-row" data-kind="background"><span>Background art</span><span class="btn-pair"><select class="media-on"><option value="1">On</option><option value="0">Off</option></select><button class="media-manage">Manage</button><button class="media-clear">Delete all</button></span></div>
+    <div class="set-row media-row" data-kind="video"><span>Videos</span><span class="btn-pair"><select class="media-on"><option value="1">On</option><option value="0">Off</option></select><button class="media-manage">Manage</button><button class="media-clear">Delete all</button></span></div>
+    <div class="set-row"><span>Unused media</span><button id="setUnused">Delete unused</button></div>
     <div class="set-row"><span>Video sound</span><span class="slider"><input type="range" id="setVidVol" min="0" max="100" step="5" /><output id="setVidVolOut"></output></span></div>
     <h3>Interface</h3>
     <div class="set-row"><span>Cover size</span><span class="slider"><input type="range" id="setCover" min="80" max="160" step="10" /><output id="setCoverOut"></output></span></div>
@@ -167,6 +170,15 @@
       <label>Launch options <small>(advanced: {rom} is the game file)</small><input name="args" value="{rom}" autocomplete="off" spellcheck="false" /></label>
       <div class="dlg-actions"><button type="button" class="addBack">Back</button><button class="primary">Choose program…</button></div>
     </form>
+  </dialog>
+
+  <!-- Which games get a gameplay clip -->
+  <dialog id="videosDlg">
+    <h2 id="mediaTitle">Videos</h2>
+    <p class="note" id="mediaNote"></p>
+    <div class="vid-tools"><input id="vidFilter" type="search" placeholder="Filter" autocomplete="off" spellcheck="false" /><button type="button" id="vidAll">Check all</button><button type="button" id="vidNone">Uncheck all</button></div>
+    <div id="vidList" class="vid-list"></div>
+    <div class="dlg-actions"><button type="button" id="vidCancel">Cancel</button><button type="button" id="vidSave" class="primary">Save</button></div>
   </dialog>
 
   <dialog id="searchDlg">

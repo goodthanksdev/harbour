@@ -128,7 +128,7 @@ function renderRow() {
   $('#empty').hidden = S.list.length > 0;
   S.list.forEach((g, i) => {
     const it = el('div', 'item'); it.dataset.i = i;
-    const front = pic(g.media?.frontHQ || g.media?.front);
+    const front = pic(boxArt(g));
     // Each cover keeps its own shape, from .5 (PSP boxes are tall, ~.57) to 1.45 wide.
     if (front) {
       it.style.backgroundImage = `url("${front}")`;
@@ -242,8 +242,8 @@ function select(i, instant = false) {
 // ---------- big picture ----------
 let heroFlip = false, heroUrl = '';
 function setHero(g) {
-  const big = g && (g.media?.fanart || g.media?.screenshot);
-  const url = pic(big || (g && (g.media?.frontHQ || g.media?.front)) || '');
+  const big = bgArt(g);
+  const url = pic(big || boxArt(g) || '');
   if (url === heroUrl) return;
   heroUrl = url;
   heroFlip = !heroFlip;
@@ -259,11 +259,14 @@ function stopVideo() {
 }
 // Game videos can be switched off (Settings): then only the cover art shows, and no clips are downloaded.
 const videosOn = () => S.config?.harbourVideos !== false;
+// The pictures shown for a game: none where that kind is switched off (Settings → Media, or for the game).
+const boxArt = g => g && S.config?.harbourBoxArt !== false && !g.noBox ? g.media?.frontHQ || g.media?.front : null;
+const bgArt = g => g && S.config?.harbourBackgrounds !== false && !g.noBackground ? g.media?.fanart || g.media?.screenshot : null;
 function startVideoSoon(g) {
   stopVideo();
   if (!videosOn()) return;
   // While clips are being fetched for a game, its old clip isn't played (it's about to be replaced).
-  if (!g?.media?.video || S.running || !S.focused || S.videoJob === 'library' || S.videoJob === g.id) return;
+  if (!g?.media?.video || g.noVideo || S.running || !S.focused || S.videoJob === 'library' || S.videoJob === g.id) return;
   videoTimer = setTimeout(() => {
     const v = $('#heroVideo');
     v.src = `${g.media.video}?v=${S.videoBust || 0}`; v.muted = !S.config.harbourVideoSound; // ?v= so a rerolled clip isn't served from cache
@@ -360,11 +363,13 @@ function openMenu(anchor) {
   add('Open game folder', () => api.openGameFolder(g.id).catch(e => toast(e.message)));
   // 🎲: background art = the next of the database's backgrounds (the big picture behind the game); box art = the
   // next cover; clip = another part of the same video; video = a different video.
-  add('🎲 Change background art', () => downloadArt('game', g.id, [g.media?.fanart || !g.media?.screenshot ? 'fanart' : 'screenshot']));
-  add('🎲 Change box art', () => downloadArt('game', g.id, ['front']));
-  if (videosOn() && g.media?.video) {
+  if (bgArt(g) || (S.config.harbourBackgrounds !== false && !g.noBackground)) add('🎲 Change background art', () => downloadArt('game', g.id, [g.media?.fanart || !g.media?.screenshot ? 'fanart' : 'screenshot']));
+  if (S.config.harbourBoxArt !== false && !g.noBox) add('🎲 Change box art', () => downloadArt('game', g.id, ['front']));
+  if (videosOn() && g.noVideo) add('Videos back on for this game', () => setGameVideo(g, true));
+  else if (videosOn() && g.media?.video) {
     add('🎲 Different clip', () => downloadVideos('game', g.id, 'reroll'));
     add('🎲 Change video', () => downloadVideos('game', g.id, 'new'));
+    add('No video for this game', () => setGameVideo(g, false));
   } else if (videosOn()) add('Get a video for this game', () => downloadVideos('game', g.id, 'missing'));
   // Undock: off the shelves, everything kept (Settings → Undocked games redocks it). A port Harbour installed itself
   // can also be deleted, folder and all.
@@ -562,8 +567,7 @@ async function afterAdd(match, what) {
   setTab(g.system); select(S.list.findIndex(x => x.id === g.id));
   UISound.play('select');
   toast(`Added ${g.title}.`, 4000);
-  downloadArt('game', g.id);
-  downloadVideos('game', g.id, 'missing');
+  if (autoMediaOn()) { downloadArt('game', g.id); downloadVideos('game', g.id, 'missing'); }
 }
 $('#addPort').addEventListener('submit', async e => {
   e.preventDefault(); const f = e.target, found = S.portFound;
@@ -732,7 +736,7 @@ async function addGameFolder(system) {
     // No emulator is installed unasked: a game whose console has none shows "Install emulator" instead of Play.
     const fresh = S.games.filter(g => r.added.some(a => a.system === g.system) && !g.media?.front && !g.recomp);
     // New games get their artwork, then a gameplay clip each, without being asked.
-    if (fresh.length) { downloadArt('library'); downloadVideos('library', '', 'missing'); }
+    if (fresh.length && autoMediaOn()) { downloadArt('library'); downloadVideos('library', '', 'missing'); }
   } catch (e) { UISound.play('error'); toast(e.message, 7000); }
 }
 $('#addGamesRoot').onclick = () => addGameFolder('');
@@ -774,10 +778,8 @@ function openSettings() {
   $('#setUnhide').textContent = hidden ? `Redock (${hidden})` : 'None';
   $('#setUnhide').disabled = !hidden;
   $('#setIdle').value = String(S.config.harbourIdle ?? 120);
-  $('#setVideosOn').value = videosOn() ? '1' : '0';
   // How much space the clips take, on the Delete button.
-  $('#setClearVideos').textContent = 'Delete all'; $('#setClearVideos').disabled = true;
-  api.videoUsage().then(bytes => { $('#setClearVideos').textContent = `Delete all (${sizeText(bytes)})`; $('#setClearVideos').disabled = !bytes; }).catch(() => {});
+  showMediaRows();
   showVolumes(); showInstallDirs();
   $('#settings').showModal();
 }
@@ -844,25 +846,120 @@ $('#setUnhide').onclick = async () => {
 $('#setCheck').onclick = () => { $('#settings').close(); checkUpdates(true); };
 // Artwork and clips download by themselves (autoMedia), so there are no buttons for them.
 const sizeText = b => b >= 1073741824 ? `${(b / 1073741824).toFixed(1)} GB` : `${Math.max(1, Math.round(b / 1048576))} MB`;
-$('#setVideosOn').onchange = e => {
-  const on = e.target.value === '1';
-  saveSetting({ harbourVideos: on });
-  // Back on: play the clip, and fetch the missing ones (by themselves, like always).
-  if (on) { startVideoSoon(S.list[S.sel]); downloadVideos('library', '', 'missing'); } else stopVideo();
+// Box art, background art and videos: each On/Off for everything, managed per game, or all deleted.
+const MEDIA = {
+  box: { label: 'Box art', setting: 'harbourBoxArt', flag: 'noBox', what: 'its box art' },
+  background: { label: 'Background art', setting: 'harbourBackgrounds', flag: 'noBackground', what: 'its background art' },
+  video: { label: 'Videos', setting: 'harbourVideos', flag: 'noVideo', what: 'its gameplay clip' },
 };
-// Deleting them also switches videos off: otherwise Harbour would just download them all again.
-$('#setClearVideos').onclick = async () => {
-  if (!confirm('Delete every game clip? Game videos will be switched off too, so they aren\'t downloaded again. Turn them back on any time.')) return;
-  stopVideo(); S.videoJob = 'library';
+const mediaOn = kind => S.config?.[MEDIA[kind].setting] !== false;
+const mediaRow = kind => $(`.media-row[data-kind="${kind}"]`);
+function showMediaRows() {
+  $('#setAutoMedia').value = autoMediaOn() ? '1' : '0';
+  const u = $('#setUnused'); u.textContent = 'Delete unused'; u.disabled = true;
+  api.mediaUnused().then(b => { u.textContent = b ? `Delete unused (${sizeText(b)})` : 'Nothing unused'; u.disabled = !b; }).catch(() => {});
+  for (const kind of Object.keys(MEDIA)) {
+    const row = mediaRow(kind), clear = row.querySelector('.media-clear');
+    row.querySelector('.media-on').value = mediaOn(kind) ? '1' : '0';
+    clear.textContent = 'Delete all'; clear.disabled = true;
+    api.mediaUsage(kind).then(b => { clear.textContent = b ? `Delete all (${sizeText(b)})` : 'Delete all'; clear.disabled = !b; }).catch(() => {});
+  }
+}
+async function afterMediaChange(kind) {
+  await reload(); S.artBust = Date.now(); renderRow(); select(S.sel, true);
+  if (kind === 'video') startVideoSoon(S.list[S.sel]);
+}
+for (const kind of Object.keys(MEDIA)) {
+  const row = mediaRow(kind);
+  row.querySelector('.media-on').onchange = async e => {
+    const on = e.target.value === '1';
+    await saveSetting({ [MEDIA[kind].setting]: on });
+    renderRow(); select(S.sel, true);
+    if (kind === 'video') { if (on) { startVideoSoon(S.list[S.sel]); downloadVideos('library', '', 'missing'); } else stopVideo(); }
+    else if (on) downloadArt('library');  // back on: fetch what's missing
+  };
+  row.querySelector('.media-manage').onclick = () => { $('#settings').close(); openMediaPicker(kind); };
+  // Deleting them all also switches them off: otherwise Harbour would just download them again.
+  row.querySelector('.media-clear').onclick = async () => {
+    if (!confirm(`Delete all ${MEDIA[kind].label.toLowerCase()}? It will be switched off too, so it isn't downloaded again. Turn it back on any time.`)) return;
+    if (kind === 'video') { stopVideo(); S.videoJob = 'library'; }
+    try {
+      const freed = await api.mediaClearAll(kind);
+      await saveSetting({ [MEDIA[kind].setting]: false });
+      showMediaRows(); toast(`${MEDIA[kind].label} deleted: ${sizeText(freed)} freed.`, 5000);
+      await afterMediaChange(kind);
+    } catch (err) { toast(err.message, 6000); }
+    finally { if (kind === 'video') S.videoJob = null; }
+  };
+}
+// Download automatically: new games get their pictures and clip by themselves. Off: only when you ask (••• menu).
+const autoMediaOn = () => S.config?.harbourAutoMedia !== false;
+$('#setAutoMedia').onchange = async e => { const on = e.target.value === '1'; await saveSetting({ harbourAutoMedia: on }); if (on) autoMedia(); };
+// Files Harbour no longer uses: kinds switched off, and ones left by games that are gone.
+$('#setUnused').onclick = async () => {
+  if (!confirm('Delete media Harbour isn\'t using? That\'s art and clips of games you unchecked in Manage, and anything left from games no longer in your library.')) return;
+  stopVideo();
+  try { const freed = await api.mediaDeleteUnused(); showMediaRows(); toast(`${sizeText(freed)} freed.`, 5000); await afterMediaChange('video'); }
+  catch (e) { UISound.play('error'); toast(e.message, 6000); }
+};
+// Which games get it: checked = yes. Unchecked ones lose their files and aren't downloaded again.
+let mediaPick = 'video', vidTicks = new Map(), vidSizes = {};
+async function openMediaPicker(kind) {
+  mediaPick = kind;
+  const m = MEDIA[kind];
+  $('#mediaTitle').textContent = m.label;
+  $('#mediaNote').textContent = `Checked games get ${m.what.replace(/^its /, '')}. Unchecked ones don't show or download it; Delete unused frees the space.`;
+  vidTicks = new Map(S.games.filter(visible).map(g => [g.id, !g[m.flag]]));
+  vidSizes = await api.mediaSizes(kind).catch(() => ({}));
+  $('#vidFilter').value = ''; renderVideoPicker();
+  $('#videosDlg').showModal(); $('#vidFilter').focus();
+}
+// Check or uncheck every box under this element (the whole list, or one console's).
+const checkAll = (root, v) => { for (const c of root.querySelectorAll('input')) { c.checked = v; c.dispatchEvent(new Event('change')); } };
+function renderVideoPicker() {
+  const q = searchKey($('#vidFilter').value);
+  const games = S.games.filter(visible).filter(g => !q || searchKey(g.title).includes(q))
+    .sort((a, b) => (releaseRank(a.system) - releaseRank(b.system)) || a.title.localeCompare(b.title));
+  const out = []; let sys = null;
+  for (const g of games) {
+    if (g.system !== sys) {
+      sys = g.system;
+      const group = el('div', 'vid-group'), head = el('h4');
+      const all = el('button', 'link', 'Check all'), none = el('button', 'link', 'Uncheck all'); all.type = none.type = 'button';
+      all.onclick = () => checkAll(group, true); none.onclick = () => checkAll(group, false);
+      head.append(el('span', '', sysOf(sys).name), all, none); group.append(head); out.push(group);
+    }
+    const l = el('label', vidSizes[g.id] ? 'has' : ''); const c = el('input'); c.type = 'checkbox'; c.checked = vidTicks.get(g.id);
+    c.onchange = () => vidTicks.set(g.id, c.checked);
+    l.append(c, el('span', '', g.title)); if (vidSizes[g.id]) l.append(el('small', '', sizeText(vidSizes[g.id])));
+    out.at(-1).append(l);
+  }
+  $('#vidList').replaceChildren(...(out.length ? out : [el('p', 'note', 'No games match.')]));
+}
+async function setGameVideo(g, on) {
   try {
-    const freed = await api.videoClearAll();
-    await saveSetting({ harbourVideos: false });
-    $('#setVideosOn').value = '0';
-    $('#setClearVideos').textContent = 'Delete all'; $('#setClearVideos').disabled = true;
-    toast(`Clips deleted: ${sizeText(freed)} freed.`, 5000);
-    await reload();
-  } catch (err) { toast(err.message, 6000); }
-  finally { S.videoJob = null; }
+    if (!on && g === S.list[S.sel]) stopVideo();
+    await api.mediaSet(on ? { kind: 'video', on: [g.id] } : { kind: 'video', off: [g.id] });
+    await reload(); toast(on ? `Videos back on for ${g.title}.` : `No video for ${g.title}.`, 4000);
+    if (on) downloadVideos('game', g.id, 'missing'); else startVideoSoon(S.list[S.sel]);
+  } catch (e) { UISound.play('error'); toast(e.message, 6000); }
+}
+$('#vidFilter').oninput = renderVideoPicker;
+// Only the games the filter shows.
+for (const [id, v] of [['#vidAll', true], ['#vidNone', false]]) $(id).onclick = () => checkAll($('#vidList'), v);
+$('#vidCancel').onclick = () => $('#videosDlg').close();
+$('#vidSave').onclick = async () => {
+  const kind = mediaPick, flag = MEDIA[kind].flag, off = [], on = [];
+  for (const [id, want] of vidTicks) { const g = S.games.find(x => x.id === id); if (!g) continue; if (!want && !g[flag]) off.push(id); if (want && g[flag]) on.push(id); }
+  $('#videosDlg').close();
+  if (!off.length && !on.length) return;
+  try {
+    if (kind === 'video' && off.some(id => id === S.list[S.sel]?.id)) stopVideo();  // Windows won't delete a clip that's playing
+    await api.mediaSet({ kind, off, on });
+    await afterMediaChange(kind);
+    toast(`${MEDIA[kind].label} off for ${off.length}, on for ${on.length}.` + (off.length ? ' Settings → Delete unused frees the space.' : ''), 5000);
+    if (on.length) { if (kind === 'video') downloadVideos('library', '', 'missing'); else downloadArt('library'); }
+  } catch (e) { UISound.play('error'); toast(e.message, 6000); }
 };
 // Artwork and clips are made by the main process; their queue jobs wait for it to say it's finished.
 const mainJob = { art: null, video: null };
@@ -938,7 +1035,7 @@ function renderSearch() {
   if (!searchHits.length) { box.append(el('div', 'none', 'No matches')); return; }
   for (const g of searchHits.slice(0, 80)) {
     const b = el('button'); b.type = 'button';
-    const front = pic(g.media?.front);
+    const front = pic(boxArt(g));
     if (front) { const img = el('img'); img.src = front; img.loading = 'lazy'; img.alt = ''; b.append(img); } else b.append(el('span', 'noart'));
     b.append(el('span', '', g.title), el('span', 'sys', shortName(sysOf(g.system).name)));
     b.onclick = () => pickSearch(g);
@@ -1171,6 +1268,7 @@ document.addEventListener('close', renderHints, true);  // a window closed (clos
 // A game tried without luck waits a week before the next try, so hopeless ones aren't searched every start.
 const AUTO_RETRY_MS = 7 * 864e5;
 function autoMedia() {
+  if (!autoMediaOn()) return;
   let tried = {};
   try { tried = JSON.parse(localStorage.getItem('harbourAutoTried') || '{}'); } catch {}
   const now = Date.now();
@@ -1181,8 +1279,8 @@ function autoMedia() {
   for (const g of fresh) tried[key(g)] = now;
   try { localStorage.setItem('harbourAutoTried', JSON.stringify(tried)); } catch {}
   // Artwork first, then clips: the queue keeps that order.
-  if (fresh.some(g => !g.media?.front)) downloadArt('library');
-  if (fresh.some(g => !g.media?.video)) downloadVideos('library', '', 'missing');
+  if (fresh.some(g => !g.media?.front && !g.noBox) || fresh.some(g => !g.media?.fanart && !g.noBackground)) downloadArt('library');
+  if (fresh.some(g => !g.media?.video && !g.noVideo)) downloadVideos('library', '', 'missing');
 }
 
 // ---------- start ----------

@@ -287,5 +287,20 @@ dialog :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .emu-catalog .emu-group:first-child { margin-top: 0; }
 /* windows stop above the control hints */
 dialog[open] { max-height: calc(100vh - 90 * var(--u)); }  /* still centred: the space left below clears the hints */
+.btn-pair { display: flex; gap: calc(10 * var(--u)); }
+.media-row .media-clear { min-width: calc(190 * var(--u)); }
+.vid-tools { display: flex; gap: calc(10 * var(--u)); margin-bottom: calc(10 * var(--u)); }
+.vid-tools input { flex: 1; min-width: 0; }
+.vid-list { max-height: 52vh; overflow-y: auto; padding-right: calc(6 * var(--u)); }
+.vid-list h4 { margin: calc(12 * var(--u)) 0 calc(4 * var(--u)); font-size: .78em; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+.vid-group:first-child h4 { margin-top: 0; }
+.vid-list h4 { display: flex; align-items: center; gap: calc(14 * var(--u)); }
+.vid-list h4 span { margin-right: auto; }
+.vid-list h4 .link { background: none; border: 0; padding: 0; font: inherit; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--muted); cursor: pointer; }
+.vid-list h4 .link:hover, .vid-list h4 .link:focus-visible { color: var(--text); }
+.vid-list label { display: flex; align-items: center; gap: calc(10 * var(--u)); padding: calc(5 * var(--u)) calc(6 * var(--u)); border-radius: 6px; }
+.vid-list input { accent-color: var(--accent); width: 1.1em; height: 1.1em; }
+.vid-list label:hover { background: rgba(255,255,255,.05); }
+.vid-list label.has small { margin-left: auto; color: var(--muted); font-size: .8em; }
 .roms-one { display: flex; align-items: center; gap: calc(12 * var(--u)); margin-top: calc(14 * var(--u)); color: var(--muted); }
 .roms-one select { flex: 1; min-width: 0; }

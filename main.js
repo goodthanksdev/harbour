@@ -162,7 +162,7 @@ function gameState(id) {
   const st = libraryState.stats[id] || {};
   const metadata = libraryState.metadata?.[id] || {};
   const customTitle = metadata.title || libraryState.titles?.[id] || '';
-  return { ...metadata, customTitle, hidden: !!libraryState.hidden?.[id], favorite: !!libraryState.favorites[id], playMs: st.ms || 0, lastPlayed: st.last || 0, plays: st.plays || 0, disc: libraryState.discs[id] || 0 };
+  return { ...metadata, customTitle, hidden: !!libraryState.hidden?.[id], favorite: !!libraryState.favorites[id], noVideo: !!libraryState.noVideo?.[id], noBox: !!libraryState.noBox?.[id], noBackground: !!libraryState.noBackground?.[id], playMs: st.ms || 0, lastPlayed: st.last || 0, plays: st.plays || 0, disc: libraryState.discs[id] || 0 };
 }
 
 // ---------- Library scanning ----------
@@ -683,6 +683,7 @@ const artwork = createArtworkService({
   dataDir: DATA,
   getSystems: () => config.systems,
   getGames: () => libraryGames,
+  wants: (game, kind) => mediaWanted(game, kind),
   normalize: looseKey,
   decodeImage: artworkPng,
   onProgress: progress => {
@@ -1555,6 +1556,83 @@ handle('game:chooseExecutable', async gameId => {
   if (!/\.exe$/i.test(file) || !fs.statSync(file).isFile()) throw new Error('Choose a game .exe file.');
   entry.executable = file; saveConfig(config);
   return {gameId, executable:file};
+});
+// Box art, background art and videos: each can be off for everything (Settings) or for single games. Either way it
+// isn't shown or downloaded, and the files stay: "Delete unused" removes the ones of games it's off for.
+const MEDIA = {
+  box: { flag: 'noBox', setting: 'harbourBoxArt', folders: ['covers'], kinds: ['front'] },
+  background: { flag: 'noBackground', setting: 'harbourBackgrounds', folders: ['fanart', 'screenshots'], kinds: ['fanart', 'screenshot'] },
+  video: { flag: 'noVideo', setting: 'harbourVideos', folders: ['videos'], kinds: ['video'] },
+};
+const mediaKind = kind => { const m = MEDIA[kind]; if (!m) throw new Error('Unknown media.'); return m; };
+function mediaWanted(game, kind) {
+  const m = Object.values(MEDIA).find(x => x.kinds.includes(kind));
+  return !m || (config[m.setting] !== false && !libraryState[m.flag]?.[game.id]);
+}
+// A game's files of this kind in Harbour's media folders.
+function mediaFiles(g, m) {
+  if (!g.base) return [];
+  const out = [];
+  for (const f of m.folders) {
+    const dir = path.join(DATA, 'media', g.system, f);
+    try { for (const n of fs.readdirSync(dir)) if (n.startsWith(g.base + '.')) out.push(path.join(dir, n)); } catch {}
+  }
+  return out;
+}
+const sizeOf = f => { try { return fs.statSync(f).size; } catch { return 0; } };
+handle('media:set', async ({ kind, off = [], on = [] }) => {
+  const m = mediaKind(kind);
+  libraryState[m.flag] ||= {};
+  for (const id of on) delete libraryState[m.flag][id];
+  for (const id of off) if (libraryGames.some(x => x.id === id)) libraryState[m.flag][id] = true;
+  saveState();
+  if (off.length || on.length) log(`${kind}: off for ${off.length}, on for ${on.length}`);
+  return true;
+});
+// Each game's size for this kind (games that have some), and all of it together.
+handle('media:sizes', kind => {
+  const m = mediaKind(kind), out = {};
+  for (const g of libraryGames) { const n = mediaFiles(g, m).reduce((t, f) => t + sizeOf(f), 0); if (n) out[g.id] = n; }
+  return out;
+});
+const mediaFolders = m => { try { return fs.readdirSync(path.join(DATA, 'media'), { withFileTypes: true }).filter(e => e.isDirectory() && !e.name.startsWith('_'))
+  .flatMap(e => m.folders.map(f => path.join(DATA, 'media', e.name, f))).filter(d => fs.existsSync(d)); } catch { return []; } };
+// Unused: a kind's files for games it's unchecked for (Manage), and anything left by games no longer in the library.
+// Switching a kind Off for everything doesn't make it unused. Only Harbour's own media folders are looked at.
+const OWN_MEDIA = ['covers', 'fanart', 'screenshots', 'logos', 'videos'];
+function unusedMedia() {
+  const bases = new Map();  // console -> names of its games' files
+  for (const g of libraryGames) if (g.base) (bases.get(g.system) || bases.set(g.system, new Set()).get(g.system)).add(g.base);
+  const out = [];
+  for (const m of Object.values(MEDIA)) for (const g of libraryGames) if (libraryState[m.flag]?.[g.id]) out.push(...mediaFiles(g, m));
+  let systems = [];
+  try { systems = fs.readdirSync(path.join(DATA, 'media'), { withFileTypes: true }).filter(e => e.isDirectory() && !e.name.startsWith('_')).map(e => e.name); } catch {}
+  for (const sys of systems) for (const folder of OWN_MEDIA) {
+    const dir = path.join(DATA, 'media', sys, folder);
+    let names = [];
+    try { names = fs.readdirSync(dir, { withFileTypes: true }).filter(e => e.isFile()).map(e => e.name); } catch { continue; }
+    for (const n of names) {
+      const base = /\.source\.json$/i.test(n) ? n.slice(0, -12) : n.replace(/\.[^.]+$/, '');  // a clip's notes: X.source.json
+      if (!bases.get(sys)?.has(base)) out.push(path.join(dir, n));
+    }
+  }
+  return out;
+}
+handle('media:unused', () => unusedMedia().reduce((n, f) => n + sizeOf(f), 0));
+handle('media:deleteUnused', async () => {
+  let freed = 0, count = 0;
+  for (const f of unusedMedia()) { freed += sizeOf(f); count++; await fsp.rm(f, { force: true }).catch(() => {}); }
+  log(`deleted unused media: ${count} files (${Math.round(freed / 1048576)} MB)`);
+  return freed;
+});
+handle('media:usage', kind => mediaFolders(mediaKind(kind)).reduce((n, d) => n + folderSize(d), 0));
+handle('media:clearAll', async kind => {
+  const m = mediaKind(kind);
+  if (kind === 'video') videos.cancel(); else artwork.cancel();
+  let freed = 0;
+  for (const d of mediaFolders(m)) { freed += folderSize(d); await fsp.rm(d, { recursive: true, force: true }); }
+  log(`deleted all ${kind} (${Math.round(freed / 1048576)} MB)`);
+  return freed;
 });
 handle('game:setFavorite', ({ gameId, favorite }) => {
   if (!libraryGames.some(g => g.id === gameId)) throw new Error('Select a game in your library first.');
@@ -2465,7 +2543,7 @@ handle('recomp:openPage', async gameId => {
 const videos = createVideoService({
   dataDir: DATA, ghJson, extract, sha256File, defenderScan, log,
   download: (url, file, onBytes) => artwork.download(url, file, onBytes),
-  getGames: () => libraryGames,
+  getGames: () => libraryGames.filter(g => !libraryState.noVideo?.[g.id]),  // games with videos off are never fetched
   getSystemName: id => config.systems.find(s => s.id === id)?.name || '',
   // The game's trailer / gameplay link from the LaunchBox database (rebuilt with links if it predates them).
   lookup: async game => { await launchbox.load(false); return (await launchbox.details(game.system, artwork.titleKeys(game)))?.video || null; },
@@ -2475,14 +2553,6 @@ handle('video:start', options => videos.start(options || {}));
 // Game clips Harbour downloaded: how much space they take, and deleting them all (data\media\<console>\videos).
 const clipFolders = () => { try { return fs.readdirSync(path.join(DATA, 'media'), { withFileTypes: true }).filter(e => e.isDirectory() && !e.name.startsWith('_')).map(e => path.join(DATA, 'media', e.name, 'videos')).filter(d => fs.existsSync(d)); } catch { return []; } };
 const folderSize = dir => fs.readdirSync(dir, { withFileTypes: true }).reduce((n, e) => n + (e.isDirectory() ? folderSize(path.join(dir, e.name)) : fs.statSync(path.join(dir, e.name)).size), 0);
-handle('video:usage', () => clipFolders().reduce((n, d) => n + folderSize(d), 0));
-handle('video:clearAll', async () => {
-  videos.cancel();
-  let freed = 0;
-  for (const d of clipFolders()) { freed += folderSize(d); await fsp.rm(d, { recursive: true, force: true }); }
-  log(`deleted all game clips (${Math.round(freed / 1048576)} MB)`);
-  return freed;
-});
 handle('video:status', () => videos.status());
 handle('video:cancel', () => { videos.cancel(); return true; });
 handle('art:start', options => artwork.start(options));
