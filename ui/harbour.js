@@ -129,9 +129,10 @@ function renderRow() {
   S.list.forEach((g, i) => {
     const it = el('div', 'item'); it.dataset.i = i;
     const front = pic(g.media?.frontHQ || g.media?.front);
+    // Each cover keeps its own shape, from .5 (PSP boxes are tall, ~.57) to 1.45 wide.
     if (front) {
       it.style.backgroundImage = `url("${front}")`;
-      const probe = new Image(); probe.onload = () => { it.style.setProperty('--ar', Math.max(.62, Math.min(1.45, probe.naturalWidth / probe.naturalHeight))); recenterSoon(); }; probe.src = front;
+      const probe = new Image(); probe.onload = () => { it.style.setProperty('--ar', Math.max(.5, Math.min(1.45, probe.naturalWidth / probe.naturalHeight))); recenterSoon(); }; probe.src = front;
     } else {
       const card = el('div', 'card', g.title); card.append(el('small', '', sysOf(g.system).name));
       it.style.setProperty('--c', sysOf(g.system).color || '#2a4a6a'); it.append(card);
