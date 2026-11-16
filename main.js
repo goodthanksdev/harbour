@@ -1899,16 +1899,23 @@ handle('harbour:addPort', async ({ folder, executable, platform, title, repo, pr
 const DEFAULT_DIRS = { ports: path.join(path.dirname(DATA), 'Ports'), emulators: path.join(path.dirname(DATA), 'Emulators') };
 const installDir = kind => config.installDirs?.[kind] || DEFAULT_DIRS[kind];
 handle('harbour:installDirs', () => ({ ports: installDir('ports'), emulators: installDir('emulators') }));
-handle('harbour:pickInstallDir', async kind => {
+// save: false only picks (the welcome screen saves its choices on Next).
+const setInstallDir = (kind, dir) => {
+  if (!DEFAULT_DIRS[kind]) throw new Error('Unknown folder.');
+  if (!canWrite(dir)) throw new Error("Harbour can't write in that folder. Pick another (Program Files needs admin rights).");
+  config.installDirs = { ...(config.installDirs || {}), [kind]: path.resolve(dir) === path.resolve(DEFAULT_DIRS[kind]) ? undefined : dir };
+  saveConfig(config);
+  return installDir(kind);
+};
+handle('harbour:setInstallDir', ({ kind, dir }) => setInstallDir(kind, dir));
+handle('harbour:pickInstallDir', async (kind, { save = true } = {}) => {
   if (!DEFAULT_DIRS[kind]) throw new Error('Unknown folder.');
   const r = await dialog.showOpenDialog(win, { title: kind === 'ports' ? 'Where should PC ports install?' : 'Where should emulators install?',
     defaultPath: installDir(kind), properties: ['openDirectory', 'createDirectory'] });
   if (r.canceled) return null;
   const dir = r.filePaths[0];
-  if (!canWrite(dir)) throw new Error("Harbour can't write in that folder. Pick another (Program Files needs admin rights).");
-  config.installDirs = { ...(config.installDirs || {}), [kind]: path.resolve(dir) === path.resolve(DEFAULT_DIRS[kind]) ? undefined : dir };
-  saveConfig(config);
-  return installDir(kind);
+  if (!save) { if (!canWrite(dir)) throw new Error("Harbour can't write in that folder. Pick another (Program Files needs admin rights)."); return dir; }
+  return setInstallDir(kind, dir);
 });
 const GAME_FILE_EXTS = [...new Set(DEFAULT_SYSTEMS.filter(s => !s.direct).flatMap(s => s.extensions).map(e => e.slice(1)))];
 handle('harbour:pickGameFile', async () => {

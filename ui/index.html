@@ -60,12 +60,26 @@
   <dialog id="welcomeDlg">
     <img class="welcome-mark" src="assets/brand/harbour-mark.svg" alt="" />
     <h2>Welcome to Harbour</h2>
-    <p class="note">Point Harbour at your games folder: it finds the console folders inside (N64, PS2, Switch…) and their games, then gets artwork and gameplay clips by itself.</p>
-    <div class="choices">
-      <button type="button" class="choice" id="welcomeFolder"><b>Pick your games folder</b><span>Games for emulators, sorted by console.</span></button>
-      <button type="button" class="choice" id="welcomePort"><b>Add a PC port / recomp</b><span>Its GitHub page and your game file. Harbour does the rest.</span></button>
+    <!-- First run: a few choices, all in Settings later too -->
+    <div id="welcomeSetup">
+      <p class="note">A few choices first. You can change any of them later in Settings.</p>
+      <div class="welcome-set">
+        <div class="set-row"><span>Download media automatically<small>Box art, backgrounds, logos and gameplay clips for every game (you can manage your media later in Settings)</small></span><select id="wAuto"><option value="1">On</option><option value="0">Off</option></select></div>
+        <div class="set-row"><span>Library view</span><select id="wView"><option value="shelf">Shelf</option><option value="tiles">Tiles</option><option value="list">List</option></select></div>
+        <div class="set-row"><span>PC ports install to</span><span class="dir-pick"><small id="wDirPorts"></small><button type="button" id="wDirPortsBtn">Change…</button></span></div>
+        <div class="set-row"><span>Emulators install to</span><span class="dir-pick"><small id="wDirEmus"></small><button type="button" id="wDirEmusBtn">Change…</button></span></div>
+      </div>
+      <div class="dlg-actions"><button type="button" id="welcomeCancel">Cancel</button><button type="button" id="welcomeNext" class="primary">Next</button></div>
     </div>
-    <div class="dlg-actions"><button type="button" id="welcomeLater">Later</button></div>
+    <div id="welcomeStart">
+    <p class="note">Add your stuff.</p>
+    <div class="choices">
+      <button type="button" class="choice" data-wkind="roms"><b>Games (ROMs)</b><span>A folder of game files. Harbour sorts them by console.</span><i class="done-tick">✓</i></button>
+      <button type="button" class="choice" data-wkind="port"><b>PC port / recomp</b><span>Its GitHub page and your game file. Harbour does the rest.</span><i class="done-tick">✓</i></button>
+      <button type="button" class="choice" data-wkind="emu"><b>Emulator</b><span>Install a well-known one in a click, or add one you have.</span><i class="done-tick">✓</i></button>
+    </div>
+    <div class="dlg-actions"><button type="button" id="welcomeBack">Back</button><button type="button" id="welcomeLater" class="primary">Done</button></div>
+    </div>
   </dialog>
 
   <dialog id="settings">

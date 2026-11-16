@@ -534,8 +534,8 @@ async function pickPort() {
 }
 $('#btnAdd').onclick = openAdd;
 for (const b of document.querySelectorAll('#addDlg .choice')) b.onclick = () => { UISound.play('select'); if (b.dataset.kind === 'roms') showAddStep('addRoms'); else if (b.dataset.kind === 'port') showPortCatalog(); else showEmuCatalog(); };
-$('#romsRoot').onclick = () => { $('#addDlg').close(); addGameFolder(''); };
-$('#romsOne').onclick = () => { const id = $('#romsConsole').value; $('#addDlg').close(); addGameFolder(id); };
+$('#romsRoot').onclick = () => { S.pickingFolder = true; $('#addDlg').close(); addGameFolder('').finally(() => { S.pickingFolder = false; backToWelcome(); }); };
+$('#romsOne').onclick = () => { const id = $('#romsConsole').value; S.pickingFolder = true; $('#addDlg').close(); addGameFolder(id).finally(() => { S.pickingFolder = false; backToWelcome(); }); };
 // The catalogue: search, pick one, and the install form fills in (with what that port needs from you).
 // Ports of an emulator game in the catalogue: the same console, and the same name once punctuation, "the" and
 // "and"/"&" are set aside ("Legend of Zelda, The - Ocarina of Time" = "The Legend of Zelda: Ocarina of Time").
@@ -633,7 +633,8 @@ function installPort(repo, rom, pick = null) {
     return { done: `${entry.title} installed` };
   });
 }
-for (const b of document.querySelectorAll('#addDlg .addBack')) b.onclick = () => { UISound.play('back'); showAddStep('addPick'); };
+// Back: to the Add menu, or out to the welcome screen when that's where you came from.
+for (const b of document.querySelectorAll('#addDlg .addBack')) b.onclick = () => { UISound.play('back'); if (S.welcoming && ['addRoms', 'addCatalog', 'addEmuPick'].some(id => !$('#' + id).hidden)) $('#addDlg').close(); else showAddStep('addPick'); };
 for (const b of document.querySelectorAll('#addDlg .addCancel')) b.onclick = () => { UISound.play('back'); $('#addDlg').close(); };
 // After adding: show it, then fetch its artwork and a gameplay clip without being asked.
 async function afterAdd(match, what) {
@@ -1389,8 +1390,8 @@ async function init() {
     .catch(() => {}).then(autoMedia);
   checkUpdates(false);
   api.portCatalog().then(list => { S.portList = list; showGame(S.list[S.sel]); }).catch(() => {});
-  // Nothing to show yet: say hello and offer the two ways in.
-  if (!S.games.length) { UISound.play('open'); $('#welcomeDlg').showModal(); }
+  // First run: a few choices, then the ways in. Later, with nothing to show yet: just the ways in.
+  if (!S.config.harbourWelcomed || !S.games.length) openWelcome(!S.config.harbourWelcomed);
   // Emulator badges: draw them once the emulators' update checks are in.
   loadEmulators().then(() => { const id = S.list[S.sel]?.id; renderRow(); const i = S.list.findIndex(g => g.id === id); select(i >= 0 ? i : 0, true); });
   api.onToast?.(m => toast(m, 5000));
@@ -1411,9 +1412,48 @@ async function init() {
 init().catch(e => toast('Harbour failed to start: ' + e.message, 10000));
 
 // ---------- first start ----------
-$('#welcomeFolder').onclick = async () => { UISound.play('select'); $('#welcomeDlg').close(); await addGameFolder(''); };
-$('#welcomePort').onclick = async () => { UISound.play('select'); $('#welcomeDlg').close(); await openAdd(); showAddStep('addGit'); };
-$('#welcomeLater').onclick = () => { UISound.play('back'); $('#welcomeDlg').close(); };
+function openWelcome(setup) {
+  $('#welcomeSetup').hidden = !setup; $('#welcomeStart').hidden = setup;
+  if (setup) {
+    S.wDirs = {};  // folders picked here, saved on Next
+    $('#wAuto').value = autoMediaOn() ? '1' : '0'; $('#wView').value = view();
+    api.installDirs().then(d => { $('#wDirPorts').textContent = $('#wDirPorts').title = d.ports; $('#wDirEmus').textContent = $('#wDirEmus').title = d.emulators; }).catch(() => {});
+  }
+  UISound.play('open'); $('#welcomeDlg').showModal();
+}
+for (const [btn, kind, out] of [['#wDirPortsBtn', 'ports', '#wDirPorts'], ['#wDirEmusBtn', 'emulators', '#wDirEmus']]) $(btn).onclick = async () => {
+  try { const p = await api.pickInstallDir(kind, { save: false }); if (p) { S.wDirs[kind] = p; $(out).textContent = $(out).title = p; } } catch (e) { UISound.play('error'); toast(e.message, 6000); }
+};
+$('#welcomeNext').onclick = async () => {
+  UISound.play('select');
+  for (const [kind, dir] of Object.entries(S.wDirs || {})) await api.setInstallDir({ kind, dir }).catch(e => toast(e.message, 6000));
+  showInstallDirs();
+  await saveSetting({ harbourAutoMedia: $('#wAuto').value === '1', harbourWelcomed: true });
+  if ($('#wView').value !== view()) await setView($('#wView').value);
+  autoMedia();
+  showWelcomeStart();
+};
+// Cancel (or Esc): nothing changes, and it isn't asked again.
+$('#welcomeCancel').onclick = () => { UISound.play('back'); $('#welcomeDlg').close(); };
+$('#welcomeDlg').addEventListener('close', () => { if (!S.config.harbourWelcomed) saveSetting({ harbourWelcomed: true }); });
+// The welcome's second step: the Add menu's three ways in. Each opens that Add screen; finishing or Back comes back
+// here, and what you have now gets a tick.
+function showWelcomeStart() {
+  $('#welcomeSetup').hidden = true; $('#welcomeStart').hidden = false;
+  const has = { roms: S.config.systems.some(s => s.romDir), port: S.games.some(g => g.recomp), emu: (S.config.customEmulators || []).length > 0 };
+  for (const b of document.querySelectorAll('#welcomeStart .choice')) b.classList.toggle('done', !!has[b.dataset.wkind]);
+  if (!$('#welcomeDlg').open) $('#welcomeDlg').showModal();
+  $('#welcomeStart .choice')?.focus();
+}
+const backToWelcome = () => { if (S.welcoming && !S.pickingFolder) setTimeout(() => { if (!document.querySelector('dialog[open]')) showWelcomeStart(); }, 50); };
+for (const b of document.querySelectorAll('#welcomeStart .choice')) b.onclick = async () => {
+  UISound.play('select'); S.welcoming = true; $('#welcomeDlg').close();
+  await openAdd();
+  if (b.dataset.wkind === 'roms') showAddStep('addRoms'); else if (b.dataset.wkind === 'port') showPortCatalog(); else showEmuCatalog();
+};
+$('#addDlg').addEventListener('close', backToWelcome);
+$('#welcomeBack').onclick = () => { UISound.play('back'); openWelcome(true); };
+$('#welcomeLater').onclick = () => { UISound.play('select'); S.welcoming = false; $('#welcomeDlg').close(); };
 
 // ---------- installing well-known emulators ----------
 // The catalogue step of ＋ → Emulator: each one with an Install button (or "Set up" once it's there).
