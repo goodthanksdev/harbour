@@ -774,7 +774,7 @@ function openSettings() {
   // How much space the clips take, on the Delete button.
   $('#setClearVideos').textContent = 'Delete all'; $('#setClearVideos').disabled = true;
   api.videoUsage().then(bytes => { $('#setClearVideos').textContent = `Delete all (${sizeText(bytes)})`; $('#setClearVideos').disabled = !bytes; }).catch(() => {});
-  showVolumes();
+  showVolumes(); showInstallDirs();
   $('#settings').showModal();
 }
 async function saveSetting(patch) {
@@ -815,6 +815,15 @@ function applyCoverSize(p = coverSize()) {
   if (S.list?.length) select(S.sel, true);
 }
 $('#setCover').oninput = e => applyCoverSize(Number(e.target.value));
+// Where new PC ports and emulators go (ones already installed stay put).
+async function showInstallDirs() {
+  const d = await api.installDirs().catch(() => null); if (!d) return;
+  for (const [id, p] of [['#dirPorts', d.ports], ['#dirEmus', d.emulators]]) { $(id).textContent = p; $(id).title = p; }
+}
+for (const [btn, kind] of [['#setDirPorts', 'ports'], ['#setDirEmus', 'emulators']]) $(btn).onclick = async () => {
+  try { const p = await api.pickInstallDir(kind); if (p) { await showInstallDirs(); toast(`New ${kind === 'ports' ? 'PC ports' : 'emulators'} will install to ${p}`, 5000); } }
+  catch (e) { UISound.play('error'); toast(e.message, 6000); }
+};
 $('#setCover').onchange = e => saveSetting({ harbourCoverSize: Number(e.target.value) });
 $('#setUiVol').oninput = e => setUiSlider(Number(e.target.value), false);
 $('#setUiVol').onchange = e => setUiSlider(Number(e.target.value), true);

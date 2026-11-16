@@ -549,7 +549,7 @@ async function scanFolders(folderReport, listings) {
         title: meta.title || displayTitle(base),
         ...(f.added ? { added: f.added } : {}),
         ...(f.recomp ? { recomp: true } : {}),
-        ...(f.recomp && inPortsDir(config.extraGames.find(x => x.id === f.added)?.path) ? { deletable: true } : {}),
+        ...(f.recomp && inPortsDir(config.extraGames.find(x => x.id === f.added)) ? { deletable: true } : {}),
         ...(f.discs ? { discs: f.discs.map(d => d.n), discPaths: f.discs.map(d => d.path) } : {}),
         ...(shell && /^#[0-9a-f]{6}$/i.test(shell) ? { shell } : {}),
         info: meta,
@@ -1147,7 +1147,7 @@ async function updateRecomp(gameId, sendRaw) {
     const root = entry.executable ? placeRelease(src, entry.executable) : entry.path;
     if (!root) throw updatesWithOwnTool(entry.source, game.title);
     const { kept, backup } = await installInto(root, src, entry.installed?.tag, send);
-    if (inPortsDir(entry.path) && path.resolve(root) === path.resolve(entry.path)) await rememberRelease(entry.id, src);
+    if (inPortsDir(entry) && path.resolve(root) === path.resolve(entry.path)) await rememberRelease(entry.id, src);
     if (entry.executable && !fs.existsSync(entry.executable)) {
       const exe = guessProgram(root, entry.source.repo);
       if (exe) entry.executable = exe;
@@ -1815,7 +1815,22 @@ handle('harbour:addPort', async ({ folder, executable, platform, title, repo, pr
 // Harbour downloads the newest Windows release (checked like any update), unpacks it into Ports\<name> beside its
 // data, puts your ROM or disc next to the program (where these ports look for it on their first start), works out
 // the name and console and adds it. Projects without a ready-to-run Windows build are refused up front.
-const PORTS_DIR = path.join(path.dirname(DATA), 'Ports');
+// Where ports and emulators install: beside Harbour's data, or a folder you chose (Settings). Installs already made
+// stay where they are.
+const DEFAULT_DIRS = { ports: path.join(path.dirname(DATA), 'Ports'), emulators: path.join(path.dirname(DATA), 'Emulators') };
+const installDir = kind => config.installDirs?.[kind] || DEFAULT_DIRS[kind];
+handle('harbour:installDirs', () => ({ ports: installDir('ports'), emulators: installDir('emulators') }));
+handle('harbour:pickInstallDir', async kind => {
+  if (!DEFAULT_DIRS[kind]) throw new Error('Unknown folder.');
+  const r = await dialog.showOpenDialog(win, { title: kind === 'ports' ? 'Where should PC ports install?' : 'Where should emulators install?',
+    defaultPath: installDir(kind), properties: ['openDirectory', 'createDirectory'] });
+  if (r.canceled) return null;
+  const dir = r.filePaths[0];
+  if (!canWrite(dir)) throw new Error("Harbour can't write in that folder. Pick another (Program Files needs admin rights).");
+  config.installDirs = { ...(config.installDirs || {}), [kind]: path.resolve(dir) === path.resolve(DEFAULT_DIRS[kind]) ? undefined : dir };
+  saveConfig(config);
+  return installDir(kind);
+});
 const GAME_FILE_EXTS = [...new Set(DEFAULT_SYSTEMS.filter(s => !s.direct).flatMap(s => s.extensions).map(e => e.slice(1)))];
 handle('harbour:pickGameFile', async () => {
   const r = await dialog.showOpenDialog(win, { title: 'Choose your game file (the ROM or disc the port is made from)', properties: ['openFile'],
@@ -1868,8 +1883,9 @@ handle('harbour:installPort', async ({ repo: link, rom, title, platform }) => {
     // Its own folder, named after the project ("SpaghettiKart"). Installed before and deleted: the same folder again,
     // where your saves and mods still are. Never on top of a folder another game in Harbour uses.
     const used = f => config.extraGames.some(x => path.resolve(x.path).toLowerCase() === path.resolve(f).toLowerCase());
-    let folder = path.join(PORTS_DIR, repo.split('/')[1].replace(/[<>:"|?*]/g, ''));
-    for (let n = 2; used(folder); n++) folder = path.join(PORTS_DIR, `${repo.split('/')[1]} ${n}`);
+    const portsDir = installDir('ports');
+    let folder = path.join(portsDir, repo.split('/')[1].replace(/[<>:"|?*]/g, ''));
+    for (let n = 2; used(folder); n++) folder = path.join(portsDir, `${repo.split('/')[1]} ${n}`);
     await fsp.mkdir(folder, { recursive: true });
     // Files already there are yours from before (a settings file you changed): the download doesn't replace them.
     await fsp.cp(src, folder, { recursive: true, force: false, errorOnExist: false });
@@ -1882,7 +1898,8 @@ handle('harbour:installPort', async ({ repo: link, rom, title, platform }) => {
     const found = title ? { title: String(title).slice(0, 120), platform: config.systems.some(s => s.id === platform) ? platform : '' }
       : await detectPort(folder, exe, { repo, installed, gameFile: rom });
     const entry = { id: randomUUID().slice(0, 8), system: 'recomp', path: folder, title: found.title, executable: exe,
-      platform: found.platform || undefined, source: { repo, prerelease: false }, installed, gameFile: rom ? path.basename(rom) : undefined };
+      platform: found.platform || undefined, source: { repo, prerelease: false }, installed, gameFile: rom ? path.basename(rom) : undefined,
+      installRoot: portsDir };
     config.extraGames.push(entry); saveConfig(config);
     await rememberRelease(entry.id, src);
     log(`installed port ${repo} ${rel.tag} (${rel.assetName}, defender: ${scan}) to ${folder} as ${found.title} [${found.platform || 'recomp'}]${rom ? ' with ' + path.basename(rom) : ''}${returning ? ', back into its folder with your files' : ''}`);
@@ -1981,7 +1998,6 @@ handle('harbour:scanEmulators', async folder => {
 });
 // ---- Installing a well-known emulator (emulators.js) ----
 // Into an Emulators folder beside Harbour's data, ready for its consoles, with updates from where it's released.
-const EMULATORS_DIR = path.join(path.dirname(DATA), 'Emulators');
 const sameSource = (a, b) => !!a && !!b && a.repo?.toLowerCase() === b.repo?.toLowerCase() && (a.host || '') === (b.host || '');
 handle('harbour:emulatorCatalog', () => CATALOG
   .map(c => ({ ...c, consoles: c.consoles.filter(id => config.systems.some(s => s.id === id)),
@@ -2003,7 +2019,7 @@ handle('harbour:installEmulator', async catalogId => {
     const { archive, scan } = await fetchRelease(rel, tmp, send);
     const src = await unpackRelease(rel, archive, tmp, send);
     send({ stage: 'Installing…', pct: 1 });
-    const folder = path.join(EMULATORS_DIR, c.name);
+    const folder = path.join(installDir('emulators'), c.name);
     await fsp.mkdir(folder, { recursive: true });
     await fsp.cp(src, folder, { recursive: true, force: false, errorOnExist: false });
     // The program: the one the catalogue names, wherever it sits in the release, else the best guess.
@@ -2377,14 +2393,16 @@ async function removeInstalled(entry) {
   await prune(entry.path);
   return { removed, left };
 }
-// "Undock and delete": only for a port Harbour installed into its own Ports folder (just its install is removed, see
-// above). Ports you installed yourself are never deleted by Harbour; they can only be undocked.
-const inPortsDir = p => { if (!p) return false; const rel = path.relative(PORTS_DIR, path.resolve(p)); return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel) && !rel.includes(path.sep); };
+// "Undock and delete": only for a port Harbour installed into a ports folder (just its install is removed, see
+// above): straight inside the folder it was installed to, or the default one. Ports you installed yourself are never
+// deleted by Harbour; they can only be undocked.
+const inside = (dir, p) => { const rel = path.relative(dir, path.resolve(p)); return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel) && !rel.includes(path.sep); };
+const inPortsDir = entry => !!entry?.path && [DEFAULT_DIRS.ports, entry.installRoot].some(d => d && inside(d, entry.path));
 handle('game:delete', async gameId => {
   const game = libraryGames.find(g => g.id === gameId && g.recomp);
   const entry = game && config.extraGames.find(x => x.id === game.added);
   if (!entry) throw new Error('Select a PC port first.');
-  if (!inPortsDir(entry.path)) throw new Error('Harbour only deletes ports it installed itself. Undock this one instead.');
+  if (!inPortsDir(entry)) throw new Error('Harbour only deletes ports it installed itself. Undock this one instead.');
   if (running.has(gameId) || isRunning(entry.executable)) throw new Error('Close the game first.');
   let result;
   try { result = await removeInstalled(entry); }
