@@ -137,7 +137,7 @@ button.waiting { display: inline-flex; align-items: center; justify-content: cen
 #empty { position: absolute; left: calc(64 * var(--u)); top: 40%; color: var(--muted); font-size: calc(22 * var(--u)); }
 
 /* ---------- hints / popovers / dialogs ---------- */
-#hints { position: fixed; z-index: 3; left: calc(64 * var(--u)); right: calc(64 * var(--u)); bottom: calc(12 * var(--u)); justify-content: center; display: flex; gap: calc(26 * var(--u)); color: var(--dim); font-size: calc(15 * var(--u)); }
+#hints { position: fixed; z-index: 3; inset: auto calc(64 * var(--u)) calc(12 * var(--u)); width: auto; height: auto; margin: 0; padding: 0; border: 0; background: none; overflow: visible; justify-content: center; display: flex; gap: calc(26 * var(--u)); color: var(--dim); font-size: calc(15 * var(--u)); }
 #hints kbd { display: inline-block; min-width: 1.6em; padding: 0 .4em; margin-right: .45em; border: 1px solid var(--line); border-radius: 5px; color: var(--muted); font-family: inherit; text-align: center; }
 .popover { position: fixed; z-index: 20; min-width: calc(280 * var(--u)); background: var(--panel); border: 1px solid var(--line); border-radius: calc(12 * var(--u)); padding: calc(8 * var(--u));
   backdrop-filter: blur(18px); box-shadow: 0 20px 60px rgba(0,0,0,.6); }

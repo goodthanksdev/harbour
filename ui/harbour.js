@@ -291,7 +291,7 @@ function showGame(g) {
   // No emulator for this console yet: the Play button installs one instead.
   const offer = emuOffer(g), playBtn = $('#btnPlay');
   if (!S.installingFor) playBtn.replaceChildren(...(offer ? [`Install ${offer.name}`] : [el('span', 'tri'), 'Play']));
-  const hint = $('#hints span'); if (hint?.lastChild) hint.lastChild.textContent = offer ? 'Install' : 'Play';
+  renderHints();
   // A PC port of this game exists (the catalogue, same game and console): say so, next to Play. Otherwise nothing.
   // It says how well the best of them runs, so "Experimental" tells you not to bother yet.
   const ports = portsFor(g), best = ports.map(x => x.status).sort((a, b) => (TIER[a] ?? 3) - (TIER[b] ?? 3))[0];
@@ -374,12 +374,12 @@ function openMenu(anchor) {
     try { const r = await api.gameDelete(g.id); await reload(); afterUpdates(); toast(`${g.title} deleted.` + (r?.kept ? ' Your saves stayed.' : ''), 5000); } catch (e) { UISound.play('error'); toast(e.message, 6000); }
   });
   const r = anchor.getBoundingClientRect();
-  m.hidden = false; S.menuOpen = true;
+  m.hidden = false; S.menuOpen = true; renderHints();
   m.style.left = Math.min(r.left, innerWidth - m.offsetWidth - 16) + 'px';
   m.style.top = Math.max(16, r.top - m.offsetHeight - 10) + 'px';
   menuFocus(0);
 }
-function closeMenu() { $('#menu').hidden = true; S.menuOpen = false; }
+function closeMenu() { $('#menu').hidden = true; S.menuOpen = false; renderHints(); }
 function menuFocus(i) { const bs = [...$('#menu').children]; bs.forEach((b, k) => b.classList.toggle('focus', k === i)); S.menuIdx = i; }
 document.addEventListener('pointerdown', e => { if (S.menuOpen && !e.target.closest('#menu') && !e.target.closest('#btnMore')) closeMenu(); });
 
@@ -932,6 +932,7 @@ function pickSearch(g) {
 $('#btnSearch').onclick = () => openSearch();
 $('#searchBox').addEventListener('input', renderSearch);
 $('#searchBox').addEventListener('keydown', e => {
+  setInput('kbm');
   const n = Math.min(searchHits.length, 80);
   if (e.key === 'ArrowDown' && n) { e.preventDefault(); searchSel = (searchSel + 1) % n; markSearch(); }
   else if (e.key === 'ArrowUp' && n) { e.preventDefault(); searchSel = (searchSel - 1 + n) % n; markSearch(); }
@@ -1010,7 +1011,8 @@ addEventListener('keydown', e => {
   const a = map[e.key]; if (!a) { poke(); return; }
   e.preventDefault(); act(a);
 });
-addEventListener('mousemove', () => poke(), { passive: true });
+addEventListener('mousemove', e => { poke(); if (Math.abs(e.movementX) + Math.abs(e.movementY) > 4) setInput('kbm'); }, { passive: true });
+addEventListener('mousedown', () => setInput('kbm'), { passive: true });
 addEventListener('wheel', e => { if (poke()) return; if (e.target.closest('#rowWrap')) select(S.sel + (e.deltaY > 0 || e.deltaX > 0 ? 1 : -1)); }, { passive: true });
 $('#btnPlay').onclick = () => play();
 $('#btnUpdate').onclick = () => update();
@@ -1039,6 +1041,7 @@ function pollPads() {
   }
 }
 function dispatchPad(k) {
+  setInput('pad');
   if (k === 'up') return act(S.menuOpen ? 'up' : 'tabprev');
   if (k === 'down') return act(S.menuOpen ? 'down' : 'tabnext');
   act(k);
@@ -1055,6 +1058,7 @@ addEventListener('gamepaddisconnected', setPolling);
 
 // ---------- freeze in the background / while a game runs ----------
 function setFrozen() {
+  renderHints();
   const frozen = S.running || !S.focused || document.hidden;
   document.body.classList.toggle('frozen', frozen);
   UISound.suspend(frozen);
@@ -1107,10 +1111,35 @@ setInterval(() => {
 }, 1000);
 
 // ---------- hints ----------
+// The buttons that do something right now, for what you're using: a controller's, or the keyboard's once you type
+// or move the mouse. They follow what's open (the shelf, the ••• menu, search, a window) and stay in front of windows.
+S.input = 'kbm';
+addEventListener('gamepadconnected', () => setInput('pad'));
+function setInput(kind) { if (S.input !== kind) { S.input = kind; renderHints(); } }
+let hintsQueued = false;
 function renderHints() {
-  const h = [['A', 'Play'], ['Y', 'Update'], ['X', 'More'], ['LB RB', 'Console'], ['Start', 'Settings'], ['Back', 'Updates'],['Back+Start (hold)', 'Close game']];
-  $('#hints').replaceChildren(...h.map(([k, t]) => { const s = el('span'); s.append(el('kbd', '', k), t); return s; }));
+  if (hintsQueued) return;
+  hintsQueued = true;
+  queueMicrotask(() => { hintsQueued = false; drawHints(); });
 }
+function drawHints() {
+  const pad = S.input === 'pad', h = [];
+  const dlg = document.querySelector('dialog[open]');
+  if (S.running) { if (pad) h.push(['Back+Start (hold)', 'Close game']); }
+  else if (dlg?.id === 'searchDlg') h.push([pad ? '↑↓' : '↑↓', 'Choose'], [pad ? 'A' : 'Enter', 'Go to game'], [pad ? 'B' : 'Esc', 'Close']);
+  else if (dlg) h.push(...(pad ? [['↑↓', 'Move'], ['←→', 'Change'], ['A', 'Select'], ['B', 'Back']] : [['Tab', 'Move'], ['Enter', 'Select'], ['Esc', 'Close']]));
+  else if (S.menuOpen) h.push(['↑↓', 'Choose'], [pad ? 'A' : 'Enter', 'Select'], [pad ? 'B' : 'Esc', 'Close']);
+  else {
+    const g = S.list[S.sel], updates = pendingUpdates().length;
+    if (g) h.push([pad ? 'A' : 'Enter', emuOffer(g) ? 'Install' : 'Play']);
+    if (g && S.recomp[g.id]?.updateAvailable) h.push([pad ? 'Y' : 'U', 'Update']);
+    if (g) h.push([pad ? 'X' : 'X', 'More']);
+    h.push([pad ? 'LB RB' : '↑↓', 'Console'], [pad ? 'L3' : 'Ctrl+F', 'Search'], [pad ? 'Start' : 'F1', 'Settings']);
+    if (updates) h.push([pad ? 'Back' : '', `Updates (${updates})`]);
+  }
+  $('#hints').replaceChildren(...h.filter(([k]) => k).map(([k, t]) => { const s = el('span'); s.append(el('kbd', '', k), t); return s; }));
+}
+document.addEventListener('close', renderHints, true);  // a window closed (close doesn't bubble: caught on the way down)
 
 // New games (dropped into a game folder, added any way) get artwork, then a gameplay clip, by themselves.
 // A game tried without luck waits a week before the next try, so hopeless ones aren't searched every start.
@@ -1286,10 +1315,10 @@ function queueChanged() {
 }
 // The badges and toasts stay in front of open windows: windows sit in the browser's top layer, so these join it
 // (as popovers) and step back in front each time a window opens.
-const raiseNotices = () => { for (const n of [$('#activity'), $('#toast')]) try { if (n.matches(':popover-open')) n.hidePopover(); n.showPopover(); } catch {} };
+const raiseNotices = () => { for (const n of [$('#hints'), $('#activity'), $('#toast')]) try { if (n.matches(':popover-open')) n.hidePopover(); n.showPopover(); } catch {} };
 {
   const showModal = HTMLDialogElement.prototype.showModal;
-  HTMLDialogElement.prototype.showModal = function () { showModal.call(this); raiseNotices(); };
+  HTMLDialogElement.prototype.showModal = function () { showModal.call(this); raiseNotices(); renderHints(); };
   raiseNotices();
 }
 
