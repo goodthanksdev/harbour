@@ -741,7 +741,7 @@ $('#renameCancel').onclick = () => $('#renameDlg').close();
 $('#renameForm').addEventListener('submit', async e => {
   e.preventDefault(); const g = renaming, title = $('#renameForm').title.value.trim();
   $('#renameDlg').close(); if (!g || !title || title === g.title) return;
-  try { await api.setTitle({ gameId: g.id, title }); g.title = title; renderRow(); select(S.sel, true); toast('Renamed. Use ••• → Download artwork if its pictures were wrong.', 5000); }
+  try { await api.setTitle({ gameId: g.id, title }); g.title = title; renderRow(); select(S.sel, true); toast('Renamed.'); autoMedia(); }
   catch (err) { toast(err.message, 5000); }
 });
 
