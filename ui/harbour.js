@@ -221,19 +221,19 @@ function pendingUpdates() {
 }
 function openUpdates() { UISound.play('open'); renderUpdates(); if (!$('#updatesDlg').open) $('#updatesDlg').showModal(); }
 function renderUpdates() {
-  const list = pendingUpdates();
-  $('#updAll').hidden = !list.some(u => u.auto);
-  $('#updAll').textContent = `Update all (${list.filter(u => u.auto).length})`;
-  $('#updAll').disabled = !list.some(u => u.auto && !jobState(`update:${u.kind}:${u.id}`));
+  const list = pendingUpdates(), all = list.filter(u => u.auto && u.kind !== 'harbour');  // Harbour restarts: never in Update all
+  $('#updAll').hidden = !all.length;
+  $('#updAll').textContent = `Update all (${all.length})`;
+  $('#updAll').disabled = !all.some(u => !jobState(`update:${u.kind}:${u.id}`));
   $('#updList').replaceChildren(...(list.length ? list.map(u => {
     const row = el('div', 'upd-row');
-    const name = el('div', 'upd-name'); name.append(el('b', '', u.name), el('small', '', `${u.kind === 'emu' ? 'Emulator' : 'Game'} · ${u.from || '?'} → ${u.to || '?'}`));
+    const name = el('div', 'upd-name'); name.append(el('b', '', u.name), el('small', '', `${u.kind === 'emu' ? 'Emulator' : u.kind === 'harbour' ? 'Harbour' : 'Game'} · ${u.from || '?'} → ${u.to || '?'}`));
     const btns = el('div', 'emu-btns');
     const b = (text, fn, cls = '') => { const x = el('button', cls, text); x.type = 'button'; x.onclick = fn; btns.append(x); return x; };
     if (u.auto) {
       // Its button shows when it's waiting in the queue, and how far it is while it runs.
       const key = `update:${u.kind}:${u.id}`, st = jobState(key), pct = st === 'running' ? Q.cur.pct : 0;
-      const x = b('Update', () => updateOne(u), 'primary');
+      const x = b(u.kind === 'harbour' ? 'Update & restart' : 'Update', () => updateOne(u), 'primary');
       x.dataset.key = key;
       if (st) spinnerButton(x, st === 'running' ? 'Updating' : 'Queued', pct);
     } else {
@@ -257,7 +257,7 @@ function updateOne(u) {
   });
 }
 // Each one downloads, checks and backs up on its own, in turn.
-$('#updAll').onclick = () => { for (const u of pendingUpdates().filter(u => u.auto)) updateOne(u); };
+$('#updAll').onclick = () => { for (const u of pendingUpdates().filter(u => u.auto && u.kind !== 'harbour')) updateOne(u); };
 $('#updClose').onclick = () => { UISound.play('back'); $('#updatesDlg').close(); };
 $('#updatePill').onclick = openUpdates;
 
