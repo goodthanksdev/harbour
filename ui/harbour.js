@@ -416,12 +416,14 @@ async function emulatorsFor(sysId) {
   return [...list.filter(e => fits(e) && (e.exe || e.custom)), ...list.filter(e => !fits(e) && e.exe)];
 }
 function showAddStep(step) {
-  for (const id of ['addPick', 'addCatalog', 'addGit', 'addPort', 'addEmuPick', 'addEmu']) $('#' + id).hidden = id !== step;
+  for (const id of ['addPick', 'addRoms', 'addCatalog', 'addGit', 'addPort', 'addEmuPick', 'addEmu']) $('#' + id).hidden = id !== step;
   $('#' + step).querySelector('select, input, button')?.focus();
 }
 async function openAdd() {
   UISound.play('open');
   $('#addPort').platform.replaceChildren(option('', 'No console (Recomp shelf)'), ...consoles().map(s => option(s.id, s.name)));
+  $('#romsConsole').replaceChildren(...consoles().map(s => option(s.id, s.name)));
+  if (consoles().some(s => s.id === S.tab)) $('#romsConsole').value = S.tab;  // the console you're looking at
   $('#emuSystems').replaceChildren(...consoles().map(s => { const l = el('label', 'check'); const c = el('input'); c.type = 'checkbox'; c.value = s.id; l.append(c, s.name); return l; }));
   for (const f of [$('#addGit'), $('#addPort'), $('#addEmu')]) f.querySelectorAll('input[type=text], input:not([type])').forEach(i => { if (i.name !== 'args') i.value = ''; });
   S.gitRom = null; S.gitPick = null; S.portGame = null; $('#gitRomName').textContent = "The ROM or disc it's made from";
@@ -449,7 +451,9 @@ async function pickPort() {
   $('#addDlg').showModal();
 }
 $('#btnAdd').onclick = openAdd;
-for (const b of document.querySelectorAll('#addDlg .choice')) b.onclick = () => { UISound.play('select'); if (b.dataset.kind === 'port') showPortCatalog(); else showEmuCatalog(); };
+for (const b of document.querySelectorAll('#addDlg .choice')) b.onclick = () => { UISound.play('select'); if (b.dataset.kind === 'roms') showAddStep('addRoms'); else if (b.dataset.kind === 'port') showPortCatalog(); else showEmuCatalog(); };
+$('#romsRoot').onclick = () => { $('#addDlg').close(); addGameFolder(''); };
+$('#romsOne').onclick = () => { const id = $('#romsConsole').value; $('#addDlg').close(); addGameFolder(id); };
 // The catalogue: search, pick one, and the install form fills in (with what that port needs from you).
 // Ports of an emulator game in the catalogue: the same console, and the same name once punctuation, "the" and
 // "and"/"&" are set aside ("Legend of Zelda, The - Ocarina of Time" = "The Legend of Zelda: Ocarina of Time").

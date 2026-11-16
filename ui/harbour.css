@@ -163,6 +163,8 @@ dialog a { color: var(--accent); }
 .file-pick .note { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .set-row .set-btns { display: flex; gap: calc(10 * var(--u)); }
 select, input:not([type=checkbox]) { background: rgba(0,0,0,.35); border: 1px solid var(--line); border-radius: 8px; padding: calc(8 * var(--u)) calc(10 * var(--u)); }
+/* The open list: solid, or it takes the box's see-through dark over white and reads grey on grey. */
+select option, select optgroup { background: #0c1624; color: var(--text); }
 #rdForm { display: grid; gap: calc(12 * var(--u)); }
 #rdForm label { display: grid; gap: 6px; color: var(--muted); }
 #rdForm label.check { display: flex; align-items: center; gap: 10px; color: var(--text); }
@@ -284,4 +286,6 @@ dialog :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .emu-catalog .emu-group { margin: calc(14 * var(--u)) 0 calc(4 * var(--u)); font-size: .78em; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
 .emu-catalog .emu-group:first-child { margin-top: 0; }
 /* windows stop above the control hints */
-dialog[open] { max-height: calc(100vh - 70 * var(--u)); margin-top: calc(14 * var(--u)); }
+dialog[open] { max-height: calc(100vh - 90 * var(--u)); }  /* still centred: the space left below clears the hints */
+.roms-one { display: flex; align-items: center; gap: calc(12 * var(--u)); margin-top: calc(14 * var(--u)); color: var(--muted); }
+.roms-one select { flex: 1; min-width: 0; }

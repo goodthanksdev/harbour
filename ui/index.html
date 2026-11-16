@@ -110,11 +110,21 @@
     <div id="addPick">
       <h2>Add to Harbour</h2>
       <div class="choices">
+        <button type="button" class="choice" data-kind="roms"><b>Games (ROMs)</b><span>A folder of game files. Harbour sorts them by console.</span></button>
         <button type="button" class="choice" data-kind="port"><b>PC port / recomp</b><span>Its GitHub page and your game file. Harbour does the rest.</span></button>
         <button type="button" class="choice" data-kind="emu"><b>Emulator</b><span>Install a well-known one in a click, or add one you have.</span></button>
       </div>
-      <p class="note">Games for emulators come from your game folders (Settings → Emulators &amp; game folders).</p>
       <div class="dlg-actions"><button type="button" class="addCancel">Cancel</button></div>
+    </div>
+    <!-- Game files: a folder with a folder per console inside, or one console's folder -->
+    <div id="addRoms" hidden>
+      <h2>Add games</h2>
+      <div class="choices">
+        <button type="button" class="choice" id="romsRoot"><b>Your games folder</b><span>One with a folder per console inside (N64, PS2, Switch…). Harbour finds them.</span></button>
+      </div>
+      <div class="roms-one"><span>Or a folder for one console:</span><select id="romsConsole" aria-label="Console"></select><button type="button" id="romsOne">Choose folder…</button></div>
+      <p class="note">New games added to these folders later show up by themselves.</p>
+      <div class="dlg-actions"><button type="button" class="addBack">Back</button></div>
     </div>
     <!-- Ports to choose from (Recompendium's catalogue) -->
     <div id="addCatalog" hidden>
