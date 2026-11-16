@@ -807,6 +807,15 @@ function setVideoSlider(v, save) {
   const video = $('#heroVideo'); video.muted = !(v > 0); video.volume = videoVolume() / 100; showVolumes();
   if (save) saveSetting({ harbourVideoSound: v > 0, ...(v > 0 ? { harbourVideoVolume: v } : {}) });
 }
+// Cover size: the shelf's covers from 80% to 160% (the picture above and the game's details move with them).
+const coverSize = () => S.config?.harbourCoverSize ?? 100;
+function applyCoverSize(p = coverSize()) {
+  document.documentElement.style.setProperty('--row-h', `calc(${210 * p / 100} * var(--u))`);
+  $('#setCover').value = p; $('#setCoverOut').textContent = `${p}%`;
+  if (S.list?.length) select(S.sel, true);
+}
+$('#setCover').oninput = e => applyCoverSize(Number(e.target.value));
+$('#setCover').onchange = e => saveSetting({ harbourCoverSize: Number(e.target.value) });
 $('#setUiVol').oninput = e => setUiSlider(Number(e.target.value), false);
 $('#setUiVol').onchange = e => setUiSlider(Number(e.target.value), true);
 $('#setVidVol').oninput = e => setVideoSlider(Number(e.target.value), false);
@@ -1170,7 +1179,7 @@ async function reload() {
 async function init() {
   S.config = await api.getConfig();
   UISound.configure({ enabled: S.config.harbourUiSound !== false });
-  applyUiVolume();
+  applyUiVolume(); applyCoverSize();
   S.uiState = await api.libraryUi().catch(() => ({}));
   S.tab = S.uiState?.system || 'all';
   renderHints();
