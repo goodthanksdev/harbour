@@ -123,9 +123,72 @@ async function loadEmulators(force = false) {
 // A picture's address, reloaded from disk after "Change artwork" (same file name, new picture).
 const pic = u => !u || !S.artBust ? u : `${u}${u.includes('?') ? '&' : '?'}a=${S.artBust}`;
 // ---------- cover row ----------
+// List view: Settings → Interface. The same games, as a column of names on the right.
+const VIEWS = ['shelf', 'tiles', 'list'];
+const VIEW_ICONS = {  // little pictures of each view for the top-bar button
+  shelf: '<rect x="2" y="13" width="5" height="8" rx="1"/><rect x="9.5" y="10" width="5" height="11" rx="1"/><rect x="17" y="13" width="5" height="8" rx="1"/>',
+  tiles: '<rect x="3" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5"/>',
+  list: '<rect x="3" y="4" width="3" height="3" rx=".8"/><rect x="8.5" y="4.5" width="12.5" height="2" rx="1"/><rect x="3" y="10.5" width="3" height="3" rx=".8"/><rect x="8.5" y="11" width="12.5" height="2" rx="1"/><rect x="3" y="17" width="3" height="3" rx=".8"/><rect x="8.5" y="17.5" width="12.5" height="2" rx="1"/>',
+};
+const view = () => VIEWS.includes(S.config?.harbourView) ? S.config.harbourView : 'shelf';
+const listView = () => view() === 'list', tilesView = () => view() === 'tiles';
+function applyView() {
+  document.body.classList.toggle('listview', listView());
+  document.body.classList.toggle('tilesview', tilesView());
+  $('#listWrap').hidden = !listView(); $('#tilesWrap').hidden = !tilesView();
+  $('#setView').value = view();
+  const name = view()[0].toUpperCase() + view().slice(1);
+  $('#btnView').innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor">${VIEW_ICONS[view()]}</svg>`;
+  $('#btnView').title = `View: ${name} (V)`;
+}
+async function setView(v) {
+  await saveSetting({ harbourView: v }); applyView(); renderRow(); select(S.sel, true); renderHints();
+  if (tilesView()) stopVideo(); else startVideoSoon(S.list[S.sel]);
+  setHero(S.list[S.sel]);
+}
+const cycleView = () => { UISound.play('tab'); return setView(VIEWS[(VIEWS.indexOf(view()) + 1) % VIEWS.length]); };
+$('#btnView').onclick = () => cycleView();
+// Tiles: a grid of covers; arrows move through it, right-click is the ••• menu.
+function renderTiles() {
+  const grid = $('#tiles');
+  if (!S.list.length) { grid.replaceChildren(el('p', 'note', 'No games here yet.')); return; }
+  grid.replaceChildren(...S.list.map((g, i) => {
+    const t = el('div', 'tile'); t.dataset.i = i;
+    const front = pic(boxArt(g));
+    if (front) t.style.backgroundImage = `url("${front}")`;
+    else { const card = el('div', 'card', g.title); card.append(el('small', '', sysOf(g.system).name)); t.style.setProperty('--c', sysOf(g.system).color || '#2a4a6a'); t.append(card); }
+    if (front) t.append(el('div', 'name', g.title));
+    if (g.favorite) t.append(el('span', 'fav', '★'));
+    if (S.recomp[g.id]?.updateAvailable) t.append(el('span', 'badge', 'UPDATE'));
+    t.onclick = () => select(i);
+    t.ondblclick = () => play();
+    t.oncontextmenu = e => { e.preventDefault(); select(i); openMenu(t); };
+    return t;
+  }));
+}
+// How many tiles fit across, for up and down.
+const tileCols = () => { const ts = $('#tiles').children; let n = 0; while (n < ts.length && ts[n].offsetTop === ts[0].offsetTop) n++; return Math.max(1, n); };
+function renderList() {
+  const list = $('#gameList'), all = S.tab === 'all' || S.tab === 'favorites';
+  if (!S.list.length) { list.replaceChildren(el('p', 'note', 'No games here yet.')); return; }
+  list.replaceChildren(...S.list.map((g, i) => {
+    const it = el('div', 'gi'); it.dataset.i = i;
+    const front = pic(boxArt(g));
+    if (front) { const img = el('img', 'thumb'); img.loading = 'lazy'; img.alt = ''; img.src = front; it.append(img); } else it.append(el('span', 'thumb'));
+    it.append(el('span', 't', g.title));
+    if (g.favorite) it.append(el('span', 'fav', '★'));
+    if (S.recomp[g.id]?.updateAvailable) { const u = el('span', 'upd'); u.title = 'Update available'; it.append(u); }
+    if (all) it.append(el('span', 's', shortName(sysOf(g.system).name)));
+    it.onclick = () => select(i);
+    it.ondblclick = () => play();
+    return it;
+  }));
+}
 function renderRow() {
   const row = $('#row'); row.replaceChildren();
   $('#empty').hidden = S.list.length > 0;
+  if (listView()) { renderList(); refreshBadges(); return; }
+  if (tilesView()) { renderTiles(); refreshBadges(); return; }
   S.list.forEach((g, i) => {
     const it = el('div', 'item'); it.dataset.i = i;
     const front = pic(boxArt(g));
@@ -227,10 +290,19 @@ function select(i, instant = false) {
   if (!S.list.length) { showGame(null); return; }
   const prev = S.sel;
   S.sel = Math.max(0, Math.min(S.list.length - 1, i));
-  const items = [...$('#row').children];
-  items.forEach((it, k) => it.classList.toggle('sel', k === S.sel));
-  const it = items[S.sel];
-  if (it) centerRow(instant);
+  if (tilesView()) {
+    const ts = $('#tiles').children;
+    ts[prev]?.classList.remove('sel'); ts[S.sel]?.classList.add('sel');
+    ts[S.sel]?.scrollIntoView({ block: 'nearest', behavior: instant ? 'instant' : 'smooth' });
+  } else if (listView()) {
+    const rows = $('#gameList').children;
+    rows[prev]?.classList.remove('sel'); rows[S.sel]?.classList.add('sel');
+    rows[S.sel]?.scrollIntoView({ block: 'nearest', behavior: instant ? 'instant' : 'smooth' });
+  } else {
+    const items = [...$('#row').children];
+    items.forEach((it, k) => it.classList.toggle('sel', k === S.sel));
+    if (items[S.sel]) centerRow(instant);
+  }
   if (!instant && prev !== S.sel) UISound.play('move');
   showGame(S.list[S.sel]);
   clearTimeout(saveTimer);
@@ -242,8 +314,13 @@ function select(i, instant = false) {
 // ---------- big picture ----------
 let heroFlip = false, heroUrl = '';
 function setHero(g) {
-  const big = bgArt(g);
-  const url = pic(big || boxArt(g) || '');
+  // The calm background: the console's colour, Harbour teal on All and Favourites.
+  $('#heroCalm').style.setProperty('--sysc', g && S.tab !== 'all' && S.tab !== 'favorites' ? sysOf(g.system).color || '#5fd6cc' : '#5fd6cc');
+  const ti = Math.max(0, S.tabs.findIndex(t => t.id === S.tab)), tn = S.tabs.length;  // across the tabs: 30% to 70%
+  $('#heroCalm').style.setProperty('--cx', `${tn > 1 ? 30 + 40 * ti / (tn - 1) : 50}%`);
+  // No background art (or tile view, where the covers are the picture): the calm background shows instead.
+  const big = tilesView() ? null : bgArt(g);
+  const url = pic(big || '');
   if (url === heroUrl) return;
   heroUrl = url;
   heroFlip = !heroFlip;
@@ -266,7 +343,7 @@ function startVideoSoon(g) {
   stopVideo();
   if (!videosOn()) return;
   // While clips are being fetched for a game, its old clip isn't played (it's about to be replaced).
-  if (!g?.media?.video || g.noVideo || S.running || !S.focused || S.videoJob === 'library' || S.videoJob === g.id) return;
+  if (tilesView() || !g?.media?.video || g.noVideo || S.running || !S.focused || S.videoJob === 'library' || S.videoJob === g.id) return;
   videoTimer = setTimeout(() => {
     const v = $('#heroVideo');
     v.src = `${g.media.video}?v=${S.videoBust || 0}`; v.muted = !S.config.harbourVideoSound; // ?v= so a rerolled clip isn't served from cache
@@ -824,6 +901,7 @@ function applyCoverSize(p = coverSize()) {
   $('#setCover').value = p; $('#setCoverOut').textContent = `${p}%`; sliderFill($('#setCover'));
   if (S.list?.length) select(S.sel, true);
 }
+$('#setView').onchange = e => setView(e.target.value);
 $('#setCover').oninput = e => applyCoverSize(Number(e.target.value));
 // Where new PC ports and emulators go (ones already installed stay put).
 async function showInstallDirs() {
@@ -1112,8 +1190,11 @@ function act(a) {
   }
   const tabIdx = S.tabs.findIndex(t => t.id === S.tab);
   switch (a) {
-    case 'left': select(S.sel - 1); break;
-    case 'right': select(S.sel + 1); break;
+    case 'up': select(S.sel - (tilesView() ? tileCols() : 1)); break;      // list and tile views
+    case 'down': select(S.sel + (tilesView() ? tileCols() : 1)); break;
+    case 'view': cycleView(); break;
+    case 'left': if (listView()) setTab(S.tabs[(tabIdx - 1 + S.tabs.length) % S.tabs.length].id); else select(S.sel - 1); break;
+    case 'right': if (listView()) setTab(S.tabs[(tabIdx + 1) % S.tabs.length].id); else select(S.sel + 1); break;
     case 'pgleft': select(S.sel - 6); break;
     case 'pgright': select(S.sel + 6); break;
     case 'tabprev': setTab(S.tabs[(tabIdx - 1 + S.tabs.length) % S.tabs.length].id); break;
@@ -1129,7 +1210,7 @@ function act(a) {
 addEventListener('keydown', e => {
   if (e.target.closest('dialog') && !['Escape'].includes(e.key)) { poke(); return; }
   if ((e.ctrlKey && e.key.toLowerCase() === 'f') || (e.key === '/' && !e.ctrlKey)) { e.preventDefault(); if (!poke()) act('search'); return; }
-  const map = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: S.menuOpen ? 'up' : 'tabprev', ArrowDown: S.menuOpen ? 'down' : 'tabnext',
+  const map = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: S.menuOpen || view() !== 'shelf' ? 'up' : 'tabprev', ArrowDown: S.menuOpen || view() !== 'shelf' ? 'down' : 'tabnext', v: 'view',
     Enter: 'ok', ' ': 'ok', Escape: 'back', PageUp: 'pgleft', PageDown: 'pgright', q: 'tabprev', e: 'tabnext', u: 'update', x: 'more', F1: 'settings' };
   const a = map[e.key]; if (!a) { poke(); return; }
   e.preventDefault(); act(a);
@@ -1153,7 +1234,7 @@ function pollPads() {
       continue;
     }
     const keys = { left: b(14) || ax(0, -1), right: b(15) || ax(0, 1), up: b(12) || ax(1, -1), down: b(13) || ax(1, 1),
-      ok: b(0), back: b(1), more: b(2), update: b(3), tabprev: b(4), tabnext: b(5), pgleft: b(6), pgright: b(7), settings: b(9), updates: b(8), search: b(10) };
+      ok: b(0), back: b(1), more: b(2), update: b(3), tabprev: b(4), tabnext: b(5), pgleft: b(6), pgright: b(7), settings: b(9), updates: b(8), search: b(10), view: b(11) };
     for (const [k, down] of Object.entries(keys)) {
       const key = p.index + k, t = held.get(key);
       if (!down) { held.delete(key); continue; }
@@ -1165,8 +1246,8 @@ function pollPads() {
 }
 function dispatchPad(k) {
   setInput('pad');
-  if (k === 'up') return act(S.menuOpen ? 'up' : 'tabprev');
-  if (k === 'down') return act(S.menuOpen ? 'down' : 'tabnext');
+  if (k === 'up') return act(S.menuOpen || view() !== 'shelf' ? 'up' : 'tabprev');
+  if (k === 'down') return act(S.menuOpen || view() !== 'shelf' ? 'down' : 'tabnext');
   act(k);
 }
 function padLoop() { pollPads(); rafId = requestAnimationFrame(padLoop); }
@@ -1257,7 +1338,9 @@ function drawHints() {
     if (g) h.push([pad ? 'A' : 'Enter', emuOffer(g) ? 'Install' : 'Play']);
     if (g && S.recomp[g.id]?.updateAvailable) h.push([pad ? 'Y' : 'U', 'Update']);
     if (g) h.push([pad ? 'X' : 'X', 'More']);
-    h.push([pad ? 'LB RB' : '↑↓', 'Console'], [pad ? 'L3' : 'Ctrl+F', 'Search'], [pad ? 'Start' : 'F1', 'Settings']);
+    if (listView()) h.push(['↑↓', 'Game']); else if (tilesView()) h.push([pad ? '✥' : '↑↓←→', 'Move']);
+    h.push([pad ? 'LB RB' : listView() ? '←→' : tilesView() ? 'Q E' : '↑↓', 'Console'],
+      [pad ? 'R3' : 'V', 'View'], [pad ? 'L3' : 'Ctrl+F', 'Search'], [pad ? 'Start' : 'F1', 'Settings']);
     if (updates) h.push([pad ? 'Back' : '', `Updates (${updates})`]);
   }
   $('#hints').replaceChildren(...h.filter(([k]) => k).map(([k, t]) => { const s = el('span'); s.append(el('kbd', '', k), t); return s; }));
@@ -1294,7 +1377,7 @@ async function reload() {
 async function init() {
   S.config = await api.getConfig();
   UISound.configure({ enabled: S.config.harbourUiSound !== false });
-  applyUiVolume(); applyCoverSize();
+  applyUiVolume(); applyCoverSize(); applyView();
   S.uiState = await api.libraryUi().catch(() => ({}));
   S.tab = S.uiState?.system || 'all';
   renderHints();

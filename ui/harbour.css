@@ -24,6 +24,14 @@ button.new { background: var(--beam); color: #2a1702; border-color: var(--beam);
    In the screensaver the shelf fades away and the picture grows to the whole screen. */
 #hero { position: fixed; top: 0; left: 0; right: 0; bottom: calc(var(--shelf-h) - 110 * var(--u)); z-index: 0; background: #050a12; transition: bottom 1.2s ease; }
 body.ambient #hero { bottom: 0; }
+/* No art to show: one soft light in one colour (--sysc: the console's, Harbour teal on All). It slides along with the
+   console tabs (--cx: Favourites on the left, All on the right) and breathes slowly. */
+@property --sysc { syntax: '<color>'; inherits: true; initial-value: #5fd6cc; }
+#heroCalm { position: absolute; inset: 0; overflow: hidden; background: #07101c; --cx: 50%; transition: --sysc 1.2s ease; }
+#heroCalm::after { content: ''; position: absolute; left: var(--cx); top: 46%; width: 95vw; height: 105vh; transform: translate(-50%, -50%);
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--sysc) 42%, transparent), color-mix(in srgb, var(--sysc) 12%, transparent) 55%, transparent);
+  transition: left 1.4s cubic-bezier(.4, 0, .2, 1); animation: calm 14s ease-in-out infinite alternate; }
+@keyframes calm { from { scale: 1; opacity: .85; } to { scale: 1.08; opacity: 1; } }
 .hero-layer { position: absolute; inset: 0; background-size: cover; background-position: center 30%; opacity: 0; transition: opacity .6s ease; }
 .hero-layer.on { opacity: 1; }
 .hero-layer.soft { filter: blur(28px) brightness(.55) saturate(1.1); transform: scale(1.12); } /* only a cover to show: blur it */
@@ -110,6 +118,41 @@ button.waiting { display: inline-flex; align-items: center; justify-content: cen
 #rowWrap #row { top: calc(18 * var(--u)); }
 #rowWrap .item { pointer-events: auto; } /* only the covers take clicks; the see-through top lets them reach the buttons */
 #rowWrap { -webkit-mask-image: linear-gradient(to right, transparent 0, #000 7%, #000 93%, transparent 100%); }
+/* ---------- tile view: a grid of covers over the picture ---------- */
+body.tilesview { --shelf-h: calc(44 * var(--u)); }
+body.tilesview #rowWrap, body.tilesview #info { display: none; }
+#tilesWrap { position: fixed; z-index: 2; left: calc(48 * var(--u)); right: calc(48 * var(--u)); top: calc(86 * var(--u)); bottom: calc(52 * var(--u));
+  overflow-y: auto; padding: calc(14 * var(--u)); border-radius: calc(14 * var(--u)); background: rgba(6, 11, 20, .55); backdrop-filter: blur(8px); scrollbar-width: thin; }
+#tiles { --tile: calc(var(--row-h) * .78); display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--tile), 1fr)); gap: calc(16 * var(--u)); }
+#tiles .tile { position: relative; aspect-ratio: .7; border-radius: calc(10 * var(--u)); overflow: hidden; cursor: pointer;
+  background: #142233 center/cover no-repeat; box-shadow: 0 6px 18px rgba(0,0,0,.45); opacity: .82; transition: transform .15s ease, opacity .15s, box-shadow .15s; }
+#tiles .tile:hover { opacity: 1; }
+#tiles .tile.sel { opacity: 1; transform: scale(1.06); z-index: 2; box-shadow: 0 0 0 calc(3 * var(--u)) var(--accent), 0 12px 30px rgba(0,0,0,.6); }
+#tiles .tile .card { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; padding: calc(10 * var(--u)); text-align: center;
+  background: linear-gradient(160deg, var(--c, #2a4a6a), #0b1522); font-weight: 700; font-size: calc(16 * var(--u)); }
+#tiles .tile .card small { display: block; margin-top: 6px; font-weight: 400; color: var(--muted); font-size: .8em; }
+#tiles .tile .name { position: absolute; left: 0; right: 0; bottom: 0; padding: calc(18 * var(--u)) calc(8 * var(--u)) calc(6 * var(--u)); font-size: calc(14 * var(--u)); font-weight: 600;
+  background: linear-gradient(transparent, rgba(0,0,0,.85)); opacity: 0; transition: opacity .15s; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#tiles .tile.sel .name, #tiles .tile:hover .name { opacity: 1; }
+#tiles .tile .fav { position: absolute; top: calc(6 * var(--u)); left: calc(8 * var(--u)); color: #ffd166; text-shadow: 0 1px 4px #000; }
+#tiles .tile .badge { position: absolute; top: calc(6 * var(--u)); right: calc(6 * var(--u)); background: var(--beam); color: #2a1702; font-size: calc(11 * var(--u)); font-weight: 800; padding: 1px 6px; border-radius: 999px; }
+#btnView svg { width: .95em; height: .95em; vertical-align: -.1em; }
+/* ---------- list view: the games in a column on the right, the picture and details stay ---------- */
+body.listview { --shelf-h: calc(44 * var(--u)); }
+body.listview #rowWrap { display: none; }
+body.listview #info { right: 46%; }
+#listWrap { position: fixed; z-index: 2; right: calc(48 * var(--u)); top: calc(86 * var(--u)); max-height: calc(100vh - 138 * var(--u)); width: 38%;  /* as tall as its games */
+  overflow-y: auto; padding: calc(8 * var(--u)); border-radius: calc(14 * var(--u)); background: rgba(6, 11, 20, .62); backdrop-filter: blur(10px);
+  scrollbar-width: thin; }
+#gameList .gi { display: flex; align-items: center; gap: calc(12 * var(--u)); padding: calc(6 * var(--u)) calc(10 * var(--u)); border-radius: calc(8 * var(--u));
+  font-size: calc(19 * var(--u)); color: #c9d4df; cursor: pointer; }
+#gameList .gi:hover { background: rgba(255,255,255,.05); }
+#gameList .gi.sel { background: rgba(95, 214, 204, .16); color: var(--text); box-shadow: inset calc(3 * var(--u)) 0 0 var(--accent); }
+#gameList .gi .thumb { flex: none; width: calc(30 * var(--u)); height: calc(40 * var(--u)); border-radius: 4px; object-fit: cover; background: rgba(255,255,255,.06); }
+#gameList .gi .t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#gameList .gi .s { flex: none; color: var(--muted); font-size: .78em; }
+#gameList .gi .fav { color: #ffd166; }
+#gameList .gi .upd { flex: none; width: .55em; height: .55em; border-radius: 50%; background: var(--beam); }
 .choices { display: grid; gap: calc(12 * var(--u)); }
 .choice { display: grid; gap: 4px; text-align: left; padding: calc(16 * var(--u)) calc(20 * var(--u)); }
 .choice b { font-size: 1.1em; }

@@ -9,6 +9,7 @@
 <body>
   <!-- The big picture: artwork that cross-fades between games, then the game's video if it has one -->
   <div id="hero" aria-hidden="true">
+    <div id="heroCalm"></div>
     <div class="hero-layer" id="heroA"></div>
     <div class="hero-layer" id="heroB"></div>
     <video id="heroVideo" muted loop playsinline preload="none"></video>
@@ -22,6 +23,7 @@
       <button id="updatePill" class="pill new" hidden title="See and install updates"></button>
       <span id="clock"></span>
       <button id="btnSearch" class="icon-btn" title="Search (Ctrl+F)" aria-label="Search"><svg viewBox="0 0 24 24" width="0.9em" height="0.9em" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5 21 21"/></svg></button>
+      <button id="btnView" class="icon-btn" title="View (V)" aria-label="Change view"></button>
       <button id="btnAdd" class="icon-btn" title="Add a game or emulator" aria-label="Add a game or emulator">＋</button>
       <button id="btnSettings" class="icon-btn" title="Settings (Start)" aria-label="Settings">⚙</button>
     </div>
@@ -42,6 +44,12 @@
   <section id="rowWrap" class="chrome" aria-label="Games">
     <div id="row" role="listbox"></div>
     <div id="empty" hidden>No games here yet.</div>
+  </section>
+  <section id="tilesWrap" class="chrome" aria-label="Games" hidden>
+    <div id="tiles" role="listbox"></div>
+  </section>
+  <section id="listWrap" class="chrome" aria-label="Games" hidden>
+    <div id="gameList" role="listbox"></div>
   </section>
 
   <footer id="hints" class="chrome" popover="manual"></footer>
@@ -76,6 +84,7 @@
     <div class="set-row"><span>Unused media</span><button id="setUnused">Delete unused</button></div>
     <div class="set-row"><span>Video sound</span><span class="slider"><input type="range" id="setVidVol" min="0" max="100" step="5" /><output id="setVidVolOut"></output></span></div>
     <h3>Interface</h3>
+    <div class="set-row"><span>Library view</span><select id="setView"><option value="shelf">Shelf</option><option value="tiles">Tiles</option><option value="list">List</option></select></div>
     <div class="set-row"><span>Cover size</span><span class="slider"><input type="range" id="setCover" min="80" max="160" step="10" /><output id="setCoverOut"></output></span></div>
     <div class="set-row"><span>UI sounds</span><span class="slider"><input type="range" id="setUiVol" min="0" max="100" step="5" /><output id="setUiVolOut"></output></span></div>
     <div class="set-row"><span>Screensaver</span><select id="setIdle"><option value="0">Off</option><option value="60">1 minute</option><option value="120">2 minutes</option><option value="300">5 minutes</option></select></div>
