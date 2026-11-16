@@ -795,7 +795,7 @@ const uiSoundsOn = () => S.config.harbourUiSound !== false, videoSoundOn = () =>
 const showVolumes = () => {
   const ui = uiSoundsOn() ? uiVolume() : 0, vid = videoSoundOn() ? videoVolume() : 0;
   $('#setUiVol').value = ui; $('#setVidVol').value = vid;
-  $('#setUiVolOut').textContent = ui || 'Off'; $('#setVidVolOut').textContent = vid || 'Off';
+  $('#setUiVolOut').textContent = ui || 'Off'; $('#setVidVolOut').textContent = vid || 'Off'; fillSliders();
 };
 function setUiSlider(v, save) {
   S.config.harbourUiSound = v > 0; if (v > 0) S.config.harbourUiVolume = v;
@@ -807,11 +807,15 @@ function setVideoSlider(v, save) {
   const video = $('#heroVideo'); video.muted = !(v > 0); video.volume = videoVolume() / 100; showVolumes();
   if (save) saveSetting({ harbourVideoSound: v > 0, ...(v > 0 ? { harbourVideoVolume: v } : {}) });
 }
+// Sliders: --p is where the handle is, so the filled part ends under the handle's centre (it runs end to end).
+function sliderFill(i) { const t = (i.value - i.min) / (i.max - i.min); i.style.setProperty('--p', `calc(${t} * (100% - var(--th)) + var(--th) / 2)`); }
+document.addEventListener('input', e => { if (e.target.matches?.('.slider input[type=range]')) sliderFill(e.target); });
+const fillSliders = () => document.querySelectorAll('.slider input[type=range]').forEach(sliderFill);
 // Cover size: the shelf's covers from 80% to 160% (the picture above and the game's details move with them).
 const coverSize = () => S.config?.harbourCoverSize ?? 100;
 function applyCoverSize(p = coverSize()) {
   document.documentElement.style.setProperty('--row-h', `calc(${210 * p / 100} * var(--u))`);
-  $('#setCover').value = p; $('#setCoverOut').textContent = `${p}%`;
+  $('#setCover').value = p; $('#setCoverOut').textContent = `${p}%`; sliderFill($('#setCover'));
   if (S.list?.length) select(S.sel, true);
 }
 $('#setCover').oninput = e => applyCoverSize(Number(e.target.value));

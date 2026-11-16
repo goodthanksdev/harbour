@@ -221,7 +221,11 @@ dialog :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* Volume sliders */
 .slider { display: flex; align-items: center; gap: 12px; }
-.slider input[type=range] { width: calc(240 * var(--u)); accent-color: var(--accent); }
+.slider input[type=range] { --p: 50%; --th: calc(20 * var(--u)); width: calc(240 * var(--u)); height: calc(20 * var(--u)); margin: 0; padding: 0; border: 0; border-radius: 999px; background: none; -webkit-appearance: none; appearance: none; cursor: pointer; }
+/* The handle runs the whole track, end to end: the filled part is drawn up to the handle's centre. */
+.slider input[type=range]::-webkit-slider-runnable-track { height: calc(8 * var(--u)); border-radius: 999px;
+  background: linear-gradient(to right, var(--accent) 0 var(--p), rgba(255,255,255,.22) var(--p) 100%); }
+.slider input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: calc(20 * var(--u)); height: calc(20 * var(--u)); margin-top: calc(-6 * var(--u)); border-radius: 50%; background: var(--accent); border: 0; box-shadow: 0 1px 4px rgba(0,0,0,.5); }
 .slider output { min-width: 2.5em; text-align: right; color: var(--text); font-variant-numeric: tabular-nums; }
 
 /* Emulator badge: grey = missing, yellow = update, teal = up to date */
