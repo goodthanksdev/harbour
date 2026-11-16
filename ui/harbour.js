@@ -508,7 +508,8 @@ function pickFromCatalog(x) {
   $('#gitNeeds').textContent = x.needs ? `Needs: ${x.needs}` : ''; $('#gitNeeds').hidden = !x.needs;
   $('#gitRomName').textContent = "The ROM or disc it's made from";
   // Came from a game on your shelf: your copy of it is the game file.
-  const own = S.portGame && S.portGame.system === x.platform ? S.portGame.romPath : null;
+  // (only for a port of that same game: searching for another one from there doesn't hand it this game's file)
+  const own = S.portGame && S.portGame.system === x.platform && nameKey(S.portGame.title) === nameKey(x.name) ? S.portGame.romPath : null;
   if (own) { S.gitRom = own; $('#gitRomName').textContent = own.split(/[\\/]/).pop(); }
   showAddStep('addGit'); (own ? $('#addGit button.primary') : $('#gitRom')).focus();
 }
