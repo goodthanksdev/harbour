@@ -1927,12 +1927,39 @@ handle('harbour:pickGameFile', async () => {
 // Only what Harbour shows is kept: the game, the project, its GitHub page, its console and what it needs from you.
 const CATALOG_FILE = path.join(DATA, 'media', '_index', 'recompendium.json');
 const CATALOG_CONSOLES = { gamecube: 'gc', megadrive: 'genesis' };
-// Harbour's own ports, listed with Recompendium's and marked as Harbour's (not rated by Recompendium).
-// romDir: the folder beside the program the game file goes in.
-const HARBOUR_PORTS = [
-  { name: 'Crash Nitro Kart', project: 'Crash Nitro Komp', repo: 'goodthanksdev/crash-nitro-komp', console: 'xbox', consoleName: 'Xbox',
-    status: 'playable', needs: 'Crash Nitro Kart (Xbox) disc image', stars: 0, year: 2003, released: true, harbour: true, romDir: 'assets' },
-];
+// Harbour's own ports, listed with Recompendium's and marked as Harbour's: every public repository of HARBOUR_OWNER
+// with the harbour-recomp topic and a harbour.json saying what it is ({ name, project, console, consoleName,
+// tier: alpha | beta | complete, needs, year, romDir: the folder beside the program the game file goes in }).
+// Read once a day, so a new one shows up by itself.
+const HARBOUR_OWNER = 'goodthanksdev';
+const HARBOUR_TIERS = ['alpha', 'beta', 'complete'];
+const HARBOUR_FILE = path.join(DATA, 'media', '_index', 'harbour-ports.json');
+let harbourList = null;
+async function harbourPorts() {
+  if (!harbourList) try { harbourList = JSON.parse(await fsp.readFile(HARBOUR_FILE, 'utf8')); } catch {}
+  if (harbourList && Date.now() - harbourList.at < 864e5) return harbourList.list;
+  try {
+    const q = encodeURIComponent(`topic:harbour-recomp user:${HARBOUR_OWNER}`);
+    const found = await ghJson(`https://api.github.com/search/repositories?q=${q}&per_page=100`);
+    const list = (await Promise.all((found.items || []).filter(r => !r.archived && !r.private).map(async r => {
+      try {
+        const file = await ghJson(`https://api.github.com/repos/${r.full_name}/contents/harbour.json`);
+        const j = JSON.parse(Buffer.from(file.content || '', 'base64').toString('utf8'));
+        if (!j.name || !j.console) return null;
+        let released = false;
+        try { released = (await ghJson(`https://api.github.com/repos/${r.full_name}/releases?per_page=5`)).some(x => !x.draft); } catch {}
+        return { name: String(j.name), project: String(j.project || r.name), repo: r.full_name, console: String(j.console),
+          consoleName: String(j.consoleName || j.console), status: HARBOUR_TIERS.includes(j.tier) ? j.tier : 'alpha',
+          needs: String(j.needs || ''), stars: r.stargazers_count || 0, year: j.year || null, released, harbour: true,
+          romDir: String(j.romDir || '').replace(/[\\/:*?"<>|.]+/g, '') };
+      } catch { return null; }
+    }))).filter(Boolean);
+    harbourList = { at: Date.now(), list };
+    await fsp.mkdir(path.dirname(HARBOUR_FILE), { recursive: true });
+    await fsp.writeFile(HARBOUR_FILE, JSON.stringify(harbourList));
+  } catch { if (!harbourList) return []; }  // offline or GitHub's limit: the last list is fine
+  return harbourList.list;
+}
 handle('harbour:portCatalog', async () => {
   let cached = null;
   try { cached = JSON.parse(await fsp.readFile(CATALOG_FILE, 'utf8')); } catch {}
@@ -1950,7 +1977,8 @@ handle('harbour:portCatalog', async () => {
     } catch (e) { if (!cached) throw e; }  // offline: last week's list is fine
   }
   const have = new Set(config.extraGames.map(x => x.source?.repo?.toLowerCase()).filter(Boolean));
-  return [...cached.list, ...HARBOUR_PORTS].map(x => ({ ...x, platform: config.systems.some(s => s.id === x.console) ? x.console : '', installed: have.has(x.repo.toLowerCase()) }));
+  const own = await harbourPorts(), mine = new Set(own.map(x => x.repo.toLowerCase()));
+  return [...cached.list.filter(x => !mine.has(x.repo.toLowerCase())), ...own].map(x => ({ ...x, platform: config.systems.some(s => s.id === x.console) ? x.console : '', installed: have.has(x.repo.toLowerCase()) }));
 });
 const installingPorts = new Set();
 handle('harbour:installPort', async ({ repo: link, rom, title, platform }) => {
@@ -1984,7 +2012,7 @@ handle('harbour:installPort', async ({ repo: link, rom, title, platform }) => {
     const exe = findGameExe(folder) || guessProgram(folder, repo);
     if (!exe) { await fsp.rm(folder, { recursive: true, force: true }); throw notReady(); }
     const returning = (await filesIn(folder)).length > (await filesIn(src)).length;  // your files were already there
-    const romDir = path.join(path.dirname(exe), HARBOUR_PORTS.find(x => x.repo.toLowerCase() === repo.toLowerCase())?.romDir || '');
+    const romDir = path.join(path.dirname(exe), (await harbourPorts()).find(x => x.repo.toLowerCase() === repo.toLowerCase())?.romDir || '');
     if (rom) { await fsp.mkdir(romDir, { recursive: true }); await fsp.copyFile(rom, path.join(romDir, path.basename(rom))); }
     const installed = { tag: rel.tag, assetId: rel.assetId, date: rel.publishedAt, uploader: rel.uploader || undefined };
     // From the catalogue the name and console are known; otherwise Harbour works them out.

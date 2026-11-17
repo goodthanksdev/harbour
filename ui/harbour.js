@@ -569,12 +569,13 @@ async function showPortCatalog(prefill = null) {
   renderPortCatalog();
   (prefill ? $('#portCatalog button:not([disabled])') : $('#catSearch'))?.focus();
 }
-const STATUS = { fully: 'Fully playable', playable: 'Playable', experimental: 'Experimental' };
+// Recompendium's ratings, then Harbour's own tiers (harbour.json in each port's repository)
+const STATUS = { fully: 'Fully playable', playable: 'Playable', experimental: 'Experimental', complete: 'Complete', beta: 'Beta', alpha: 'Alpha' };
 // Harbour's own ports: its mark, in white.
 function harbourMark() {
   const m = el('img', 'hb-mark'); m.src = 'assets/brand/harbour-mark.svg'; m.alt = ''; m.title = "Harbour's own port"; return m;
 }
-const TIER = { fully: 0, playable: 1, experimental: 2 };
+const TIER = { fully: 0, complete: 0, playable: 1, beta: 1, experimental: 2, alpha: 2 };
 function renderPortCatalog() {
   const q = looseText($('#catSearch').value), only = $('#catConsole').value;
   const owned = new Set(S.games.map(g => g.system));
