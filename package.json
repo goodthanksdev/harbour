@@ -1,6 +1,6 @@
 {
   "name": "harbour",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Harbour: a lightweight game launcher for recomps, ports and emulators.",
   "license": "MIT-0",
   "main": "main.js",
