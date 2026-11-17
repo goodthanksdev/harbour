@@ -528,9 +528,28 @@ async function pickPort() {
   f.title.value = found.title || '';
   f.platform.value = found.platform || '';
   f.repo.value = found.repo || '';
-  $('#portFound').textContent = `${found.exeName}` + (found.repo ? ` · ${found.installed ? `you have ${found.installed.tag}` : 'version unknown'}` : '');
+  showPortFound();
   showAddStep('addPort');
   $('#addDlg').showModal();
+  f.title.focus();  // not Change, the first thing in the card
+}
+// What Harbour picked to start the game, and its setup if it has one: shown so a wrong guess is easy to fix.
+const fileName = p => String(p || '').split(/[\\/]/).pop();
+function showPortFound() {
+  const found = S.portFound;
+  const change = el('button', 'link', 'Change'); change.type = 'button';
+  change.onclick = async () => {
+    const exe = await api.pickPortExe(found.folder);
+    if (!exe) return;
+    found.executable = exe; found.exeName = fileName(exe);
+    if (found.setup === exe) found.setup = null;
+    UISound.play('select'); showPortFound();
+  };
+  const line = el('span', '', 'Starts with '); line.append(el('b', '', found.exeName), ' ', change);
+  const parts = [line];
+  if (found.setup) parts.push(el('span', '', `First-time setup: ${fileName(found.setup)}`));
+  if (found.repo) parts.push(el('span', '', found.installed ? `You have ${found.installed.tag}` : 'Version unknown'));
+  $('#portFound').replaceChildren(...parts.flatMap((p, i) => i ? [el('br'), p] : [p]));
 }
 $('#btnAdd').onclick = openAdd;
 for (const b of document.querySelectorAll('#addDlg .choice')) b.onclick = () => { UISound.play('select'); if (b.dataset.kind === 'roms') showAddStep('addRoms'); else if (b.dataset.kind === 'port') showPortCatalog(); else showEmuCatalog(); };
@@ -636,6 +655,8 @@ function installPort(repo, rom, pick = null) {
   return enqueue('port:' + repo.toLowerCase().split('/').slice(-2).join('/'), `Installing ${name}`, async () => {
     const entry = await api.installPort({ repo, rom, title: pick?.name, platform: pick?.platform });
     await afterAdd(g => g.added === entry.id, entry.title);
+    // which program it starts, so a wrong pick is noticed (••• → Choose game .exe… changes it)
+    toast(`${entry.title} starts with ${fileName(entry.executable)}${entry.setup ? `, after its setup ${fileName(entry.setup)}` : ''}. Wrong one? ••• → Choose game .exe…`, 7000);
     return { done: `${entry.title} installed` };
   });
 }
@@ -659,7 +680,7 @@ $('#addPort').addEventListener('submit', async e => {
   try {
     // A changed GitHub link means the version Harbour matched no longer applies.
     const sameRepo = f.repo.value.trim() === (found.repo || '');
-    const entry = await api.addPort({ folder: found.folder, executable: found.executable, platform: f.platform.value, title: f.title.value,
+    const entry = await api.addPort({ folder: found.folder, executable: found.executable, setup: found.setup, platform: f.platform.value, title: f.title.value,
       repo: f.repo.value, prerelease: sameRepo && found.prerelease, installed: sameRepo ? found.installed : null });
     if (entry) afterAdd(g => g.added === entry.id, entry.title);
   } catch (err) { UISound.play('error'); toast(err.message, 6000); }

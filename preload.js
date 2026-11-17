@@ -37,6 +37,7 @@ contextBridge.exposeInMainWorld('api', {
   openGameFolder: id => call('game:openFolder', id),
   chooseGameExecutable: id => call('game:chooseExecutable', id),
   pickPort: () => call('harbour:pickPort'),
+  pickPortExe: folder => call('harbour:pickPortExe', folder),
   detectPort: options => call('harbour:detectPort', options),
   gameRemove: id => call('game:remove', id),
   gameDelete: id => call('game:delete', id),

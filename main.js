@@ -1150,7 +1150,7 @@ async function updateRecomp(gameId, sendRaw) {
     const { kept, backup } = await installInto(root, src, entry.installed?.tag, send);
     if (inPortsDir(entry) && path.resolve(root) === path.resolve(entry.path)) await rememberRelease(entry.id, src);
     if (entry.executable && !fs.existsSync(entry.executable)) {
-      const exe = guessProgram(root, entry.source.repo);
+      const exe = findGameExe(root, { repo: entry.source.repo, title: entry.title }) || guessProgram(root, entry.source.repo);
       if (exe) entry.executable = exe;
     }
     entry.installed = { tag: rel.tag, assetId: rel.assetId, date: rel.publishedAt, at: new Date().toISOString(), uploader: rel.uploader || entry.installed?.uploader };
@@ -1259,7 +1259,10 @@ function quitGame() {
 // PC games and other "run the file itself" systems: programs are started in their own folder;
 // shortcuts (.lnk, .url) and anything else are opened the way Windows would open them.
 async function launchDirect(game) {
-  const file = game.recomp ? config.extraGames.find(x => x.id === game.added)?.executable : game.romPath;
+  let file = game.recomp ? config.extraGames.find(x => x.id === game.added)?.executable : game.romPath;
+  // the game's program gone (a port rebuilds it), its setup still there: the setup makes it again
+  const own = game.recomp ? config.extraGames.find(x => x.id === game.added) : null;
+  if (file && !fs.existsSync(file) && own?.setup && fs.existsSync(own.setup)) file = own.setup;
   if (!file) throw new Error('Choose its program first: ••• → Choose game .exe…');
   if (!fs.existsSync(file)) throw new Error(`${path.basename(file)} is missing. Was it moved or deleted?`);
   // Programs are started directly; batch files, shortcuts and anything else open the way the system would.
@@ -1280,6 +1283,14 @@ async function launchDirect(game) {
     const child = spawn(exe, args, { cwd, env: launchEnv(), detached: true, stdio: 'ignore' });
     child.once('error', e => reject(new Error(`Launch failed: ${e.message}`)));
     child.once('spawn', () => { track(game, child); child.unref(); resolve(true); });
+    // A port's setup that makes the game's program: once it closes, Play starts that program from then on.
+    if (entry && SETUP_EXE.test(path.basename(exe))) child.once('exit', () => {
+      const best = portPrograms(entry.path, { repo: entry.source?.repo, title: entry.title }).programs[0];
+      if (!best || path.resolve(best) === path.resolve(exe)) return;
+      entry.setup = exe; entry.executable = best; saveConfig(config);
+      log(`${entry.title}: setup made ${path.basename(best)}, which Play starts now`);
+      win?.webContents.send('toast', `${entry.title} is set up: Play now starts ${path.basename(best)}.`);
+    });
   });
 }
 // The disc to start a multi-disc game with. Systems whose emulators read .m3u playlists get one
@@ -1665,24 +1676,48 @@ handle('library:saveUi', patch => {
   return true;
 });
 // ---------- Adding things the easy way ----------
-// A PC port / recomp: pick its folder; the game's .exe is found by itself when there's only one real
-// candidate (helpers like uninstallers, crash reporters and redistributables don't count).
-const HELPER_EXE = /unins|setup|install|crash_?(pad|handler|report|dump|sender|upload)|report|redist|clang|lld-link|xbe_recomp|vcredist|dxsetup|updater|update|ffmpeg|ffprobe|7z|helper|cli\.exe$|dotnet|vc_|createdump/i;
-function findGameExe(folder) {
+// A PC port / recomp: the programs in its folder, sorted the same way wherever Harbour needs one. Helpers are never
+// the game (uninstallers, crash reporters, redistributables, the build tools some recomps ship); a setup or installer
+// is kept apart: some ports only have one at first, and it makes the game's program from your files. The rest are
+// ranked: in the folder itself before deeper ones, named like the project or the game, then the biggest.
+const HELPER_EXE = /unins|crash_?(pad|handler|report|dump|sender|upload)|report|redist|clang|lld|ninja|cmake|python|xbe_recomp|dxsetup|dxwebsetup|updater|update|ffmpeg|ffprobe|7z|helper|elevate|cli\.exe$|dotnet|vc_|createdump/i;
+const SETUP_EXE = /setup|install/i;
+function portPrograms(folder, { repo, title } = {}) {
   const found = [];
   const walk = (dir, depth) => {
     let entries = [];
     try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
     for (const e of entries) {
       const p = path.join(dir, e.name);
-      if (e.isDirectory() && depth < 2 && !/^(_harbour-backup|disc|data|saves?|mods|cache|shaders?)$/i.test(e.name)) walk(p, depth + 1);
-      else if (e.isFile() && /\.exe$/i.test(e.name) && !HELPER_EXE.test(e.name)) found.push({ p, depth });
+      if (e.isDirectory() && depth < 2 && !/^(_harbour-backup|disc|data|saves?|mods|cache|shaders?|tools?|toolchain|deps|redist)$/i.test(e.name)) walk(p, depth + 1);
+      else if (e.isFile() && /\.exe$/i.test(e.name) && !HELPER_EXE.test(e.name)) {
+        let size = 0;
+        try { size = fs.statSync(p).size; } catch {}
+        found.push({ p, depth, size, setup: SETUP_EXE.test(e.name) });
+      }
     }
   };
   walk(folder, 0);
-  const top = found.filter(f => f.depth === 0);
-  return (top.length === 1 ? top : found.length === 1 ? found : []).map(f => f.p)[0] || null;
+  const words = s => String(s || '').toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length > 2 && !/^(the|recomp|recompiled|port|win64|x64|windows|pc)$/.test(w));
+  const hints = new Set([...words(String(repo || '').split('/').pop()), ...words(title)]);
+  const score = f => {
+    const name = path.basename(f.p, '.exe').toLowerCase();
+    let v = -f.depth * 100 + Math.min(f.size / 1e6, 99) / 10;  // a megabyte is a tenth of a point, up to ten
+    for (const w of hints) if (name.includes(w)) v += 30;
+    return v;
+  };
+  const ranked = found.sort((a, b) => score(b) - score(a));
+  const programs = ranked.filter(f => !f.setup), setups = ranked.filter(f => f.setup);
+  // only a setup beside the folder's top and programs deeper in: those are tools it ships, the setup comes first
+  const setupFirst = setups[0]?.depth === 0 && !programs.some(f => f.depth === 0);
+  return { programs: programs.map(f => f.p), setups: setups.map(f => f.p), setupFirst };
 }
+// The program that starts the game (its setup while the game's own program isn't made yet)
+function findGameExe(folder, hints) {
+  const { programs, setups, setupFirst } = portPrograms(folder, hints);
+  return (setupFirst ? setups[0] : programs[0]) || setups[0] || null;
+}
+function findSetupExe(folder, hints) { return portPrograms(folder, hints).setups[0] || null; }
 // "BanjoKazooie-PC" -> "Banjo Kazooie", "gta-vcs-recomp" -> "Gta Vcs" (a starting point; you can rename it).
 const titleFromFolder = name => name.replace(/[-_ .](pc|port|recomp(iled)?|windows|win64|x64)$/i, '').replace(/[-_.]+/g, ' ')
   .replace(/([a-z])([A-Z])/g, '$1 $2').replace(/\s+/g, ' ').trim().replace(/\b\w/g, c => c.toUpperCase());
@@ -1877,16 +1912,23 @@ handle('harbour:pickPort', async () => {
   }
   const found = await detectPort(folder, executable);
   log(`detected ${folder}: ${JSON.stringify(found)}`);
-  return { folder, executable, exeName: path.basename(executable), ...found };
+  const setup = findSetupExe(folder, { repo: found.repo, title: found.title });
+  return { folder, executable, exeName: path.basename(executable), setup: setup && path.resolve(setup) !== path.resolve(executable) ? setup : null, ...found };
+});
+// The add card's "Change": another program in the port's folder (or anywhere) starts the game.
+handle('harbour:pickPortExe', async folder => {
+  const r = await dialog.showOpenDialog(win, { title: 'Which program starts the game?', defaultPath: folder, properties: ['openFile'], filters: [{ name: 'Programs', extensions: ['exe'] }] });
+  return r.canceled ? null : r.filePaths[0];
 });
 // Step 2: add it as confirmed.
-handle('harbour:addPort', async ({ folder, executable, platform, title, repo, prerelease, installed }) => {
+handle('harbour:addPort', async ({ folder, executable, setup, platform, title, repo, prerelease, installed }) => {
   if (!folder || !executable || !fs.existsSync(executable)) throw new Error('Choose the game\'s folder first.');
   if (platform && !config.systems.some(s => s.id === platform)) throw new Error('Unknown console.');
   if (config.extraGames.some(x => x.system === 'recomp' && path.resolve(x.path) === path.resolve(folder))) throw new Error('That game is already in Harbour.');
   const source = String(repo || '').trim() ? { repo: parseRepo(repo), prerelease: !!prerelease } : undefined;
   const entry = { id: randomUUID().slice(0, 8), system: 'recomp', path: folder, title: String(title || '').trim().slice(0, 120) || titleFromFolder(path.basename(folder)),
-    executable, platform: platform || undefined, source, installed: source && installed?.tag ? installed : undefined };
+    executable, platform: platform || undefined, source, installed: source && installed?.tag ? installed : undefined,
+    setup: setup && fs.existsSync(setup) && path.resolve(setup) !== path.resolve(executable) ? setup : undefined };
   config.extraGames.push(entry); saveConfig(config);
   return { ...entry, exeName: path.basename(executable) };
 });
@@ -2009,8 +2051,10 @@ handle('harbour:installPort', async ({ repo: link, rom, title, platform }) => {
     await fsp.mkdir(folder, { recursive: true });
     // Files already there are yours from before (a settings file you changed): the download doesn't replace them.
     await fsp.cp(src, folder, { recursive: true, force: false, errorOnExist: false });
-    const exe = findGameExe(folder) || guessProgram(folder, repo);
+    const hints = { repo, title };
+    const exe = findGameExe(folder, hints) || guessProgram(folder, repo);
     if (!exe) { await fsp.rm(folder, { recursive: true, force: true }); throw notReady(); }
+    const setup = findSetupExe(folder, hints);
     const returning = (await filesIn(folder)).length > (await filesIn(src)).length;  // your files were already there
     const romDir = path.join(path.dirname(exe), (await harbourPorts()).find(x => x.repo.toLowerCase() === repo.toLowerCase())?.romDir || '');
     if (rom) { await fsp.mkdir(romDir, { recursive: true }); await fsp.copyFile(rom, path.join(romDir, path.basename(rom))); }
@@ -2020,7 +2064,7 @@ handle('harbour:installPort', async ({ repo: link, rom, title, platform }) => {
       : await detectPort(folder, exe, { repo, installed, gameFile: rom });
     const entry = { id: randomUUID().slice(0, 8), system: 'recomp', path: folder, title: found.title, executable: exe,
       platform: found.platform || undefined, source: { repo, prerelease: false }, installed, gameFile: rom ? path.basename(rom) : undefined,
-      installRoot: portsDir };
+      installRoot: portsDir, setup: setup && path.resolve(setup) !== path.resolve(exe) ? setup : undefined };
     config.extraGames.push(entry); saveConfig(config);
     await rememberRelease(entry.id, src);
     log(`installed port ${repo} ${rel.tag} (${rel.assetName}, defender: ${scan}) to ${folder} as ${found.title} [${found.platform || 'recomp'}]${rom ? ' with ' + path.basename(rom) : ''}${returning ? ', back into its folder with your files' : ''}`);
